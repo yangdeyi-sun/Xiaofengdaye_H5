@@ -1,0 +1,566 @@
+{
+  "name": "atlas_vfx_16",
+  "version": 1,
+  "id": "VFX-16",
+  "pages": [
+    {
+      "image": "atlas_vfx_16.webp",
+      "png": "png/atlases/atlas_vfx_16.png",
+      "size": {
+        "w": 1820,
+        "h": 780
+      },
+      "decodedBytes": 5678400
+    }
+  ],
+  "frames": {
+    "swarm_depart_00": {
+      "page": 0,
+      "frame": {
+        "x": 2,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_depart_01": {
+      "page": 0,
+      "frame": {
+        "x": 262,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_depart_02": {
+      "page": 0,
+      "frame": {
+        "x": 522,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_depart_03": {
+      "page": 0,
+      "frame": {
+        "x": 782,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_depart_04": {
+      "page": 0,
+      "frame": {
+        "x": 1042,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_depart_05": {
+      "page": 0,
+      "frame": {
+        "x": 1302,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_depart_06": {
+      "page": 0,
+      "frame": {
+        "x": 1562,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_depart_07": {
+      "page": 0,
+      "frame": {
+        "x": 2,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_arrive_00": {
+      "page": 0,
+      "frame": {
+        "x": 262,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_arrive_01": {
+      "page": 0,
+      "frame": {
+        "x": 522,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_arrive_02": {
+      "page": 0,
+      "frame": {
+        "x": 782,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_arrive_03": {
+      "page": 0,
+      "frame": {
+        "x": 1042,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_arrive_04": {
+      "page": 0,
+      "frame": {
+        "x": 1302,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_arrive_05": {
+      "page": 0,
+      "frame": {
+        "x": 1562,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_arrive_06": {
+      "page": 0,
+      "frame": {
+        "x": 2,
+        "y": 522,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "swarm_arrive_07": {
+      "page": 0,
+      "frame": {
+        "x": 262,
+        "y": 522,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    }
+  },
+  "animations": {
+    "swarm_depart": {
+      "frames": [
+        "swarm_depart_00",
+        "swarm_depart_01",
+        "swarm_depart_02",
+        "swarm_depart_03",
+        "swarm_depart_04",
+        "swarm_depart_05",
+        "swarm_depart_06",
+        "swarm_depart_07"
+      ],
+      "fps": 12,
+      "loop": false,
+      "events": []
+    },
+    "swarm_arrive": {
+      "frames": [
+        "swarm_arrive_00",
+        "swarm_arrive_01",
+        "swarm_arrive_02",
+        "swarm_arrive_03",
+        "swarm_arrive_04",
+        "swarm_arrive_05",
+        "swarm_arrive_06",
+        "swarm_arrive_07"
+      ],
+      "fps": 12,
+      "loop": false,
+      "events": []
+    }
+  },
+  "meta": {
+    "format": "RGBA8888",
+    "scale": 2,
+    "padding": 2,
+    "colorSpace": "sRGB",
+    "premultiplied": false,
+    "filter": "linear",
+    "mipmaps": false,
+    "source": "SVG original, baked frames",
+    "reducedMotion": [
+      {
+        "state": "swarm_depart",
+        "frame": "swarm_depart_03"
+      },
+      {
+        "state": "swarm_arrive",
+        "frame": "swarm_arrive_03"
+      }
+    ]
+  }
+}

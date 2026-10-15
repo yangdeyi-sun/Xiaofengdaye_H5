@@ -1,0 +1,1100 @@
+{
+  "name": "atlas_vfx_11",
+  "version": 1,
+  "id": "VFX-11",
+  "pages": [
+    {
+      "image": "atlas_vfx_11.webp",
+      "png": "png/atlases/atlas_vfx_11.png",
+      "size": {
+        "w": 1820,
+        "h": 1300
+      },
+      "decodedBytes": 9464000
+    }
+  ],
+  "frames": {
+    "season_spring_00": {
+      "page": 0,
+      "frame": {
+        "x": 2,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_spring_01": {
+      "page": 0,
+      "frame": {
+        "x": 262,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_spring_02": {
+      "page": 0,
+      "frame": {
+        "x": 522,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_spring_03": {
+      "page": 0,
+      "frame": {
+        "x": 782,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_spring_04": {
+      "page": 0,
+      "frame": {
+        "x": 1042,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_spring_05": {
+      "page": 0,
+      "frame": {
+        "x": 1302,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_spring_06": {
+      "page": 0,
+      "frame": {
+        "x": 1562,
+        "y": 2,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_spring_07": {
+      "page": 0,
+      "frame": {
+        "x": 2,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_summer_00": {
+      "page": 0,
+      "frame": {
+        "x": 262,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_summer_01": {
+      "page": 0,
+      "frame": {
+        "x": 522,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_summer_02": {
+      "page": 0,
+      "frame": {
+        "x": 782,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_summer_03": {
+      "page": 0,
+      "frame": {
+        "x": 1042,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_summer_04": {
+      "page": 0,
+      "frame": {
+        "x": 1302,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_summer_05": {
+      "page": 0,
+      "frame": {
+        "x": 1562,
+        "y": 262,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_summer_06": {
+      "page": 0,
+      "frame": {
+        "x": 2,
+        "y": 522,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_summer_07": {
+      "page": 0,
+      "frame": {
+        "x": 262,
+        "y": 522,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_autumn_00": {
+      "page": 0,
+      "frame": {
+        "x": 522,
+        "y": 522,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_autumn_01": {
+      "page": 0,
+      "frame": {
+        "x": 782,
+        "y": 522,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_autumn_02": {
+      "page": 0,
+      "frame": {
+        "x": 1042,
+        "y": 522,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_autumn_03": {
+      "page": 0,
+      "frame": {
+        "x": 1302,
+        "y": 522,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_autumn_04": {
+      "page": 0,
+      "frame": {
+        "x": 1562,
+        "y": 522,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_autumn_05": {
+      "page": 0,
+      "frame": {
+        "x": 2,
+        "y": 782,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_autumn_06": {
+      "page": 0,
+      "frame": {
+        "x": 262,
+        "y": 782,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_autumn_07": {
+      "page": 0,
+      "frame": {
+        "x": 522,
+        "y": 782,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_winter_00": {
+      "page": 0,
+      "frame": {
+        "x": 782,
+        "y": 782,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_winter_01": {
+      "page": 0,
+      "frame": {
+        "x": 1042,
+        "y": 782,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_winter_02": {
+      "page": 0,
+      "frame": {
+        "x": 1302,
+        "y": 782,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_winter_03": {
+      "page": 0,
+      "frame": {
+        "x": 1562,
+        "y": 782,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_winter_04": {
+      "page": 0,
+      "frame": {
+        "x": 2,
+        "y": 1042,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_winter_05": {
+      "page": 0,
+      "frame": {
+        "x": 262,
+        "y": 1042,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_winter_06": {
+      "page": 0,
+      "frame": {
+        "x": 522,
+        "y": 1042,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    },
+    "season_winter_07": {
+      "page": 0,
+      "frame": {
+        "x": 782,
+        "y": 1042,
+        "w": 256,
+        "h": 256
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 256,
+        "h": 256
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 256
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 61.44,
+        "y": 61.44,
+        "w": 133.12,
+        "h": 153.6
+      }
+    }
+  },
+  "animations": {
+    "season_spring": {
+      "frames": [
+        "season_spring_00",
+        "season_spring_01",
+        "season_spring_02",
+        "season_spring_03",
+        "season_spring_04",
+        "season_spring_05",
+        "season_spring_06",
+        "season_spring_07"
+      ],
+      "fps": 12,
+      "loop": false,
+      "events": []
+    },
+    "season_summer": {
+      "frames": [
+        "season_summer_00",
+        "season_summer_01",
+        "season_summer_02",
+        "season_summer_03",
+        "season_summer_04",
+        "season_summer_05",
+        "season_summer_06",
+        "season_summer_07"
+      ],
+      "fps": 12,
+      "loop": false,
+      "events": []
+    },
+    "season_autumn": {
+      "frames": [
+        "season_autumn_00",
+        "season_autumn_01",
+        "season_autumn_02",
+        "season_autumn_03",
+        "season_autumn_04",
+        "season_autumn_05",
+        "season_autumn_06",
+        "season_autumn_07"
+      ],
+      "fps": 12,
+      "loop": false,
+      "events": []
+    },
+    "season_winter": {
+      "frames": [
+        "season_winter_00",
+        "season_winter_01",
+        "season_winter_02",
+        "season_winter_03",
+        "season_winter_04",
+        "season_winter_05",
+        "season_winter_06",
+        "season_winter_07"
+      ],
+      "fps": 12,
+      "loop": false,
+      "events": []
+    }
+  },
+  "meta": {
+    "format": "RGBA8888",
+    "scale": 2,
+    "padding": 2,
+    "colorSpace": "sRGB",
+    "premultiplied": false,
+    "filter": "linear",
+    "mipmaps": false,
+    "source": "SVG original, baked frames",
+    "reducedMotion": [
+      {
+        "state": "season_spring",
+        "frame": "season_spring_03"
+      },
+      {
+        "state": "season_summer",
+        "frame": "season_summer_03"
+      },
+      {
+        "state": "season_autumn",
+        "frame": "season_autumn_03"
+      },
+      {
+        "state": "season_winter",
+        "frame": "season_winter_03"
+      }
+    ]
+  }
+}

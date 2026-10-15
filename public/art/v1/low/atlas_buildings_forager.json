@@ -1,0 +1,565 @@
+{
+  "name": "atlas_buildings_forager",
+  "version": 1,
+  "id": "HIVE-06",
+  "pages": [
+    {
+      "image": "atlas_buildings_forager.webp",
+      "size": {
+        "w": 910,
+        "h": 390
+      },
+      "decodedBytes": 1419600
+    }
+  ],
+  "frames": {
+    "idle_00": {
+      "page": 0,
+      "frame": {
+        "x": 1,
+        "y": 1,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "idle_01": {
+      "page": 0,
+      "frame": {
+        "x": 131,
+        "y": 1,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "idle_02": {
+      "page": 0,
+      "frame": {
+        "x": 261,
+        "y": 1,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "idle_03": {
+      "page": 0,
+      "frame": {
+        "x": 391,
+        "y": 1,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "idle_04": {
+      "page": 0,
+      "frame": {
+        "x": 521,
+        "y": 1,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "idle_05": {
+      "page": 0,
+      "frame": {
+        "x": 651,
+        "y": 1,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "idle_06": {
+      "page": 0,
+      "frame": {
+        "x": 781,
+        "y": 1,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "idle_07": {
+      "page": 0,
+      "frame": {
+        "x": 1,
+        "y": 131,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "transport_00": {
+      "page": 0,
+      "frame": {
+        "x": 131,
+        "y": 131,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "transport_01": {
+      "page": 0,
+      "frame": {
+        "x": 261,
+        "y": 131,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "transport_02": {
+      "page": 0,
+      "frame": {
+        "x": 391,
+        "y": 131,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "transport_03": {
+      "page": 0,
+      "frame": {
+        "x": 521,
+        "y": 131,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "transport_04": {
+      "page": 0,
+      "frame": {
+        "x": 651,
+        "y": 131,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "transport_05": {
+      "page": 0,
+      "frame": {
+        "x": 781,
+        "y": 131,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "transport_06": {
+      "page": 0,
+      "frame": {
+        "x": 1,
+        "y": 261,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    },
+    "transport_07": {
+      "page": 0,
+      "frame": {
+        "x": 131,
+        "y": 261,
+        "w": 128,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "anchor": {
+        "x": 0.5,
+        "y": 0.78
+      },
+      "hitArea": {
+        "x": 30.72,
+        "y": 30.72,
+        "w": 66.56,
+        "h": 76.8
+      }
+    }
+  },
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle_00",
+        "idle_01",
+        "idle_02",
+        "idle_03",
+        "idle_04",
+        "idle_05",
+        "idle_06",
+        "idle_07"
+      ],
+      "fps": 12,
+      "loop": true,
+      "events": []
+    },
+    "transport": {
+      "frames": [
+        "transport_00",
+        "transport_01",
+        "transport_02",
+        "transport_03",
+        "transport_04",
+        "transport_05",
+        "transport_06",
+        "transport_07"
+      ],
+      "fps": 12,
+      "loop": true,
+      "events": []
+    }
+  },
+  "meta": {
+    "format": "RGBA8888",
+    "scale": 1,
+    "padding": 1,
+    "colorSpace": "sRGB",
+    "premultiplied": false,
+    "filter": "linear",
+    "mipmaps": false,
+    "source": "128px downsample of SVG-derived 256px atlas",
+    "reducedMotion": [
+      {
+        "state": "idle",
+        "frame": "idle_03"
+      },
+      {
+        "state": "transport",
+        "frame": "transport_03"
+      }
+    ]
+  }
+}

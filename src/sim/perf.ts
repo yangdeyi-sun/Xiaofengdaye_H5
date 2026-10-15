@@ -1,0 +1,21 @@
+declare const process: { exit(code: number): never };
+/** 性能：10000 只逻辑蜜蜂下的单步模拟耗时（需求书12.1 逻辑蜂群 ≥10000） */
+import { DEFAULT_CONFIG } from '../domain/GameConfig';
+import { createInitialState } from '../domain/NewGame';
+import { GameEngine } from '../domain/GameEngine';
+import { BigNum } from '../common/BigNum';
+import { Bld, Res, Role } from '../domain/Types';
+const e = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'perf', 0, 9));
+const cells = e.run.hive.cells.filter((c) => c.ring <= 1 && c.building === '');
+[Bld.ScoutRoom, Bld.ForagerRoom, Bld.Storage, Bld.Brewery, Bld.GuardRoom, Bld.Nursery].forEach((b, i) => { cells[i].building = b; });
+e.hive.recomputeAdjacency();
+e.run.colony.roles[Role.Forager] = 6000; e.run.colony.roles[Role.House] = 2500;
+e.run.colony.roles[Role.Scout] = 500; e.run.colony.roles[Role.Guard] = 1000;
+e.run.res[Res.Honey] = BigNum.of(1e9);
+e.run.map.fields.forEach((f) => { f.discovered = true; f.intelExpiresAt = 1e9; });
+e.run.tasksDone.push('t_build_storage', 't_build_brewery');
+const t0 = Date.now(); for (let i = 0; i < 3000; i++) e.step(0.1); const dt = Date.now() - t0;
+const per = dt / 3000;
+console.log(`10000 logical bees: ${per.toFixed(3)} ms/step (budget at 10Hz: 100ms) adults=${e.w.adults()} scoutAgents=${e.run.map.scouts.length}`);
+const t1 = Date.now(); const r = e.settleOffline(7200, 'p', ''); console.log(`offline 2h settlement: ${Date.now() - t1} ms`, r !== null);
+process.exit(per < 5 ? 0 : 1);

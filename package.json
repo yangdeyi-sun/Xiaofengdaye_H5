@@ -1,0 +1,19 @@
+{
+  "name": "xiaofengdaye-h5",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/test.mjs && node scripts/test-platform.mjs",
+    "verify:core": "node scripts/verify-core-parity.mjs",
+    "sim": "node scripts/run-sim.mjs sim 4 -v",
+    "perf": "node scripts/run-sim.mjs perf",
+    "dev": "node scripts/dev.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.3"
+  }
+}
