@@ -176,11 +176,11 @@ function fl(id: string, name: string, tier: number, yieldMul: number, maxStock: 
 }
 
 const FLOWERS: FlowerDef[] = [
-  fl('wild', '野花丛', 1, 1.0, 24, 0.25, 0, 'sunflower', '#F7C8E0', '#F2B705', false),
+  fl('wild', '野花丛', 1, 1.0, 72, 0.25, 0, 'sunflower', '#F7C8E0', '#F2B705', false),
   fl('sunflower', '向日葵花田', 2, 1.6, 260, 2.4, 0, 'lavender', '#FFC93C', '#7A4B1E', false),
   fl('lavender', '薰衣草田', 3, 2.4, 480, 4.0, 0, 'eco', '#A88BEB', '#5B3FA0', false),
   fl('eco', '稀有生态花田', 4, 3.4, 800, 6.0, 0.004, '', '#6FD3C1', '#1F7A6C', true),
-  fl('clover', '三叶草地', 1, 1.1, 30, 0.3, 0, 'sunflower', '#FFFFFF', '#79B851', false),
+  fl('clover', '三叶草地', 1, 1.1, 90, 0.3, 0, 'sunflower', '#FFFFFF', '#79B851', false),
   fl('rapeseed', '油菜花田', 2, 1.8, 300, 2.6, 0, 'lavender', '#F9E04B', '#C9A100', false),
   fl('snowlotus', '雪莲', 4, 2.8, 400, 3.0, 0.008, '', '#EAF6FF', '#9CC9E8', true),
   fl('waterlily', '睡莲', 4, 2.6, 420, 3.2, 0.008, '', '#FFB7C5', '#F2D16B', true),
@@ -316,7 +316,7 @@ function tk(id: string, name: string, desc: string, kind: string, rewards: Rewar
 }
 
 const TASKS: TaskDef[] = [
-  tk('t_first_nectar', '第一滴花蜜', '点击花朵采集花蜜', 'main', [rw(H, 4)]),
+  tk('t_first_nectar', '第一滴花蜜', '按住花丛采集花蜜', 'main', [rw(H, 4)]),
   tk('t_build_brewery', '酿蜜房', '建造酿蜜房，缓解花蜜转化瓶颈', 'main', [rw(H, 4)]),
   tk('t_first_egg', '首次产卵', '蜂后消耗蜂蜜产下第一只幼虫', 'main', [rw(H, 30)]),
   tk('t_first_house', '巢内工蜂', '分化第一只巢内工蜂', 'main', [rw(H, 15)]),
@@ -365,8 +365,8 @@ function tu(id: string, title: string, text: string, focus: string, doneTask: st
 
 // 先改善加工，再补采集与花源；首只侦察蜂完成后交还发展决策。
 const TUTORIAL: TutorialStepDef[] = [
-  tu('tap', '采集花蜜', '点击花丛采蜜。基础酿蜜很慢，积攒18蜂蜜先改善加工。', 'field', 't_first_nectar'),
-  tu('brewery', '建造酿蜜房', '花蜜堆着酿不完？建造酿蜜房，立即加快转换。', 'hive', 't_build_brewery'),
+  tu('tap', '采集花蜜', '先点击花丛采蜜两次，之后按住花丛就能连续采集。蜂巢酿蜜很慢，攒够18蜂蜜就去建酿蜜房。', 'field', 't_first_nectar'),
+  tu('brewery', '建造酿蜜房', '花蜜堆着酿不完？建造酿蜜房，酿蜜明显加快；酿蜜房越多越快。', 'hive', 't_build_brewery'),
   tu('egg', '手动孵化', '打开蜂后页，点击孵化获得幼虫。每次孵化的新卵都会更贵。', 'queen', 't_first_egg'),
   tu('house', '分化巢内工蜂', '选择将幼虫分化为巢内工蜂，进一步提高酿蜜能力。', 'queen', 't_first_house'),
   tu('foragerRoom', '建造采集蜂巢房', '酿蜜变快，花蜜不够了。建造采集蜂巢房补充原料。', 'hive', 't_build_forager'),
@@ -376,14 +376,17 @@ const TUTORIAL: TutorialStepDef[] = [
 ];
 
 export const DEFAULT_CONFIG: GameConfigDef = {
-  configVersion: '0.1.0-cfg7',
+  configVersion: '0.1.0-cfg8',
   schemaVersion: 2,
   economy: {
     manualYield: 2,
-    baseConvertRate: 0.6,
-    perBeeConvert: 0.12,
+    // 起步酿蜜刻意放慢：手动采到的花蜜会堆积，酿蜜房才显得必要
+    baseConvertRate: 0.4,
+    perBeeConvert: 0.04,
     baseConvertRatio: 0.5,
-    houseBrewRate: 1.5,
+    // 酿蜜房逐级提速：第 k 座酿蜜房提供 breweryRate × (1 + 0.5 × (k - 1)) 花蜜/秒
+    breweryRate: 1.8,
+    houseBrewRate: 2.0,
     houseConvertRatio: 0.5,
     waxHoneyPerSec: 0.4,
     waxRatio: 0.25,
@@ -409,6 +412,7 @@ export const DEFAULT_CONFIG: GameConfigDef = {
     lifespan: 1800,
     scoutSample: 4,
     holdCollectPerSec: 3,
+    flowerRecoverSec: 3,
     expandBaseWax: 18,
     expandRingGrowth: 2.4,
     expandCellGrowth: 1.07,

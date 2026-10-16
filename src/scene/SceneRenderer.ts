@@ -138,6 +138,11 @@ export class SceneRenderer {
   private lastEggAt: number = -10;
   private lastCheerAt: number = -10;
   private lastResearchAt: number = -10;
+  /** 双击缩放的平滑过渡目标；zoom<=0 表示没有进行中的过渡 */
+  private camTarget: Camera = new Camera();
+  /** 巢内视图顶部被界面占用的高度（像素） */
+  hudTop: number = 0;
+  private camAnim: number = 0;
 
   constructor(eng: GameEngine) {
     this.eng = eng;
@@ -172,6 +177,19 @@ export class SceneRenderer {
       }
     }
     this.ambientCues();
+    if (this.camAnim > 0) {
+      const k = Math.min(1, dt * 9);
+      this.cam.x += (this.camTarget.x - this.cam.x) * k;
+      this.cam.y += (this.camTarget.y - this.cam.y) * k;
+      this.cam.zoom += (this.camTarget.zoom - this.cam.zoom) * k;
+      this.camAnim -= dt;
+      if (this.camAnim <= 0 || Math.abs(this.camTarget.zoom - this.cam.zoom) < 0.002) {
+        this.cam.x = this.camTarget.x;
+        this.cam.y = this.camTarget.y;
+        this.cam.zoom = this.camTarget.zoom;
+        this.camAnim = 0;
+      }
+    }
   }
 
   private fieldVisible(): boolean {
@@ -329,7 +347,10 @@ export class SceneRenderer {
         const s = this.eng.run.season.season;
         const anim = s === SeasonId.Winter || s === SeasonId.WinterPrep ? 'season_winter' :
           (s === SeasonId.Autumn ? 'season_autumn' : (s === SeasonId.Summer ? 'season_summer' : 'season_spring'));
-        this.screenFx('atlas_vfx_11', anim);
+        // 秋季不再播放落叶特效
+        if (anim !== 'season_autumn') {
+          this.screenFx('atlas_vfx_11', anim);
+        }
         this.addText('banner', 0, 0, e.text, '#FFFFFF', true, '');
       } else if (e.kind === 'task') {
         this.screenFx('atlas_vfx_15', 'task');
@@ -640,6 +661,7 @@ export class SceneRenderer {
   }
 
   pan(dx: number, dy: number): void {
+    this.camAnim = 0;
     this.cam.x -= dx / this.cam.zoom;
     this.cam.y -= dy / this.cam.zoom;
     const lim = this.eng.w.region().maxRadius + 120;
@@ -648,7 +670,28 @@ export class SceneRenderer {
   }
 
   zoomBy(f: number): void {
+    this.camAnim = 0;
     this.cam.zoom = Math.max(0.25, Math.min(2.5, this.cam.zoom * f));
+  }
+
+  /** 双击：以点击处为中心放大一档；已经放大时平滑回到默认视野 */
+  doubleTapZoom(sx: number, sy: number, w: number, h: number): void {
+    const base = Math.max(0.35, Math.min(1.4, Math.min(w, h) / 420));
+    const lim = this.eng.w.region().maxRadius + 120;
+    if (this.cam.zoom > base * 1.35) {
+      this.camTarget.zoom = base;
+      this.camTarget.x = 0;
+      this.camTarget.y = -40;
+    } else {
+      const z = Math.min(2.5, base * 2);
+      const wx = this.screenToWorldX(sx, w);
+      const wy = this.screenToWorldY(sy, h);
+      this.camTarget.zoom = z;
+      // 放大后点击处仍停在手指下方
+      this.camTarget.x = Math.max(-lim, Math.min(lim, wx - (sx - w / 2) / z));
+      this.camTarget.y = Math.max(-lim, Math.min(lim, wy - (sy - h / 2) / z));
+    }
+    this.camAnim = 0.6;
   }
 
   fitDefault(w: number, h: number): void {
@@ -721,13 +764,13 @@ export class SceneRenderer {
   private seasonTint(): string {
     const s = this.eng.run.season.season;
     if (s === SeasonId.Winter) {
-      return 'rgba(235,242,250,0.22)';
+      return 'rgba(235,242,250,0.12)';
     }
     if (s === SeasonId.WinterPrep) {
       return 'rgba(220,200,170,0.16)';
     }
     if (s === SeasonId.Autumn) {
-      return 'rgba(214,150,60,0.10)';
+      return 'rgba(230,160,60,0.06)';
     }
     return 'rgba(0,0,0,0)';
   }
@@ -771,13 +814,19 @@ export class SceneRenderer {
     const vy0 = this.cam.y - h / 2 / z - 30;
     const vy1 = this.cam.y + h / 2 / z + 30;
     Sprites.tile(ctx, `art/v1/tile_${theme}.webp`, vx0, vy0, vx1, vy1, 256, 1);
-    // 四季地表覆盖（嫩芽 / 盛花 / 落叶 / 霜雪）
-    if (eng.run.season.formal || eng.run.season.season !== SeasonId.Tutorial) {
-      Sprites.tile(ctx, `art/v1/overlay_${seasonOverlay(eng.run.season.season)}.webp`, vx0, vy0, vx1, vy1, 256, 0.9);
+    // 四季地表：春夏用嫩芽/盛花覆盖层；秋季整片地面转为金黄（不再铺落叶）；冬季整片积雪
+    const season = eng.run.season.season;
+    if (season === SeasonId.Winter) {
+      this.drawSnowGround(ctx, vx0, vy0, vx1, vy1);
+    } else if (season === SeasonId.Autumn || season === SeasonId.WinterPrep) {
+      this.drawAutumnGround(ctx, vx0, vy0, vx1, vy1, season === SeasonId.WinterPrep);
+    } else if (eng.run.season.formal || season !== SeasonId.Tutorial) {
+      Sprites.tile(ctx, `art/v1/overlay_${seasonOverlay(season)}.webp`, vx0, vy0, vx1, vy1, 256, 0.9);
     }
-    // 装饰：草叶 + 种区道具
+    // 装饰：草叶 + 种区道具（冬季草叶被雪盖住）
     if (z > 0.3) {
-      ctx.strokeStyle = 'rgba(60,110,40,0.28)';
+      ctx.strokeStyle = season === SeasonId.Winter ? 'rgba(150,170,190,0.22)' :
+        (season === SeasonId.Autumn || season === SeasonId.WinterPrep ? 'rgba(160,110,40,0.32)' : 'rgba(60,110,40,0.28)');
       ctx.lineWidth = 1.4;
       ctx.beginPath();
       this.decor.forEach((d: Decor) => {
@@ -939,6 +988,61 @@ export class SceneRenderer {
     ctx.fillRect(0, 0, w, h);
     this.drawWeather(ctx, w, h);
     this.drawShots(ctx, 'screen', w, 0, 0, h);
+  }
+
+  /** 秋季地面：整片转为暖金色草甸，叠几处浅色干草光斑；不铺落叶贴图 */
+  private drawAutumnGround(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, late: boolean): void {
+    ctx.fillStyle = late ? 'rgba(222,196,146,0.62)' : 'rgba(238,186,92,0.58)';
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    const step = 110;
+    const sx = Math.floor(x0 / step) * step;
+    const sy = Math.floor(y0 / step) * step;
+    ctx.fillStyle = late ? 'rgba(245,232,205,0.35)' : 'rgba(255,224,150,0.38)';
+    for (let x = sx; x < x1 + step; x += step) {
+      for (let y = sy; y < y1 + step; y += step) {
+        const h = Math.sin(x * 7.13 + y * 3.71) * 24634.6345;
+        const r = h - Math.floor(h);
+        if (r < 0.5) {
+          continue;
+        }
+        ctx.beginPath();
+        ctx.ellipse(x + r * 60, y + (1 - r) * 50, 26 + r * 30, 10 + r * 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  /** 冬季积雪地面：整片覆盖白雪，再叠一层淡蓝阴影和雪粒，避免露出草地 */
+  private drawSnowGround(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number): void {
+    ctx.fillStyle = 'rgba(246,249,252,0.94)';
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    // 起伏的雪堆阴影：按世界坐标固定，平移镜头时不闪烁
+    const step = 90;
+    const sx = Math.floor(x0 / step) * step;
+    const sy = Math.floor(y0 / step) * step;
+    ctx.fillStyle = 'rgba(196,214,232,0.35)';
+    for (let x = sx; x < x1 + step; x += step) {
+      for (let y = sy; y < y1 + step; y += step) {
+        const h = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+        const r = h - Math.floor(h);
+        if (r < 0.45) {
+          continue;
+        }
+        ctx.beginPath();
+        ctx.ellipse(x + r * 50, y + (1 - r) * 40, 18 + r * 26, 6 + r * 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    for (let x = sx; x < x1 + step; x += step) {
+      for (let y = sy; y < y1 + step; y += step) {
+        const h = Math.sin(x * 4.1 + y * 9.7) * 15731.743;
+        const r = h - Math.floor(h);
+        ctx.beginPath();
+        ctx.ellipse(x + 20 + r * 40, y + 10 + r * 50, 14 + r * 18, 4 + r * 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
   /** 采集蜂头顶状态角标：冬季寒冷 / 缺蜜停工 / 受伤 */
@@ -1283,8 +1387,6 @@ export class SceneRenderer {
       anim = 'rain';
     } else if (s === SeasonId.Winter) {
       anim = 'snow';
-    } else if (s === SeasonId.Autumn) {
-      anim = 'leaves';
     } else if (s === SeasonId.Summer && theme === 'dryland') {
       anim = Math.floor(this.time / 8) % 2 === 0 ? 'heat' : 'dust';
     }
@@ -1414,9 +1516,12 @@ export class SceneRenderer {
   private layoutHex(w: number, h: number): void {
     const vr = this.visibleRing();
     const span = (vr * 2 + 1);
-    this.hexSize = Math.max(14, Math.min(w / (span * SQRT3 + 0.4), h / (span * 1.5 + 1.2)) * 0.98);
+    // 顶部信息栏占用的高度不放巢格，避免外圈被资源栏、提示行挡住
+    const top = Math.max(0, Math.min(this.hudTop, h * 0.45));
+    const avail = Math.max(120, h - top - 12);
+    this.hexSize = Math.max(14, Math.min(w / (span * SQRT3 + 0.4), avail / (span * 1.5 + 1.2)) * 0.98);
     this.hexCx = w / 2;
-    this.hexCy = h / 2 + this.hexSize * 0.2;
+    this.hexCy = top + avail / 2 + this.hexSize * 0.2;
   }
 
   cellX(c: HexCell): number {
@@ -1685,8 +1790,18 @@ export class SceneRenderer {
       }
       const selected = c.cellId === this.selectedCell;
       const placeable = this.placing.length > 0 && c.building.length === 0;
-      if (selected || placeable) {
-        ho.alpha = selected ? 1 : 0.55 + 0.45 * pulse;
+      if (selected) {
+        // 选中只描边，不盖住巢房图标
+        hexPath(ctx, x, y, S * 0.97);
+        ctx.save();
+        ctx.shadowColor = 'rgba(255,214,90,0.95)';
+        ctx.shadowBlur = Math.max(6, S * 0.35);
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = Math.max(2.5, S * 0.1);
+        ctx.stroke();
+        ctx.restore();
+      } else if (placeable) {
+        ho.alpha = 0.55 + 0.45 * pulse;
         if (!Sprites.draw(ctx, 'atlas_hex', 'selected', 0, x, y, hexW * 0.98, ho)) {
           hexPath(ctx, x, y, S * 0.96);
           ctx.strokeStyle = '#FFFFFF';

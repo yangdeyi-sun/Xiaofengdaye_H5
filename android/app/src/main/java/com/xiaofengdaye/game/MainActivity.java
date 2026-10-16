@@ -62,7 +62,7 @@ public final class MainActivity extends Activity {
         game.requestApplyInsets();
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
-                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::confirmExit);
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::handleBack);
         }
         game.loadUrl("https://appassets.androidplatform.net/assets/index.html");
     }
@@ -76,7 +76,12 @@ public final class MainActivity extends Activity {
         if (game != null) { game.onResume(); lifecycle("pageshow"); }
     }
     @Override public void onBackPressed() {
-        confirmExit();
+        handleBack();
+    }
+    private void handleBack() {
+        game.evaluateJavascript("window.__xfHandleNativeBack ? window.__xfHandleNativeBack() : false", handled -> {
+            if (!"true".equals(handled)) confirmExit();
+        });
     }
     private void confirmExit() {
         new AlertDialog.Builder(this).setTitle("返回蜂巢休息？")

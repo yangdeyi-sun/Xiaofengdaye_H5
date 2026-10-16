@@ -492,7 +492,7 @@ export class ProgressionService {
     if (this.w.count(Bld.ScoutRoom) > 0 && this.w.role(Role.Scout) > 0) {
       meta.tutorialStep = steps.length;
       meta.tutorialDone = true;
-      this.w.msg('milestone', '接下来，这个蜜蜂王国就交由你把握它的发展了！');
+      this.w.msg('info', '新手引导完成：蜂后把整座蜂巢托付给了你。');
     }
   }
 

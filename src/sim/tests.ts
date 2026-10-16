@@ -335,14 +335,15 @@ if (legacyState !== null) {
   const flowers = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'flowers', 0, 12));
   const field = flowers.run.map.fields[0];
   const initialStock = field.stock;
-  flowers.collect(field.fieldId, 1000);
+  for (let i = 0; i < 100 && field.stock > 0; i++) flowers.collect(field.fieldId, 10);
   ok(field.stock === 0 && flowers.w.econ.num(Res.Nectar) <= initialStock + 1e-6,
     'manual harvest is bounded by actual flower stock');
   const nectar = flowers.w.econ.num(Res.Nectar);
   ok(!flowers.collect(field.fieldId, 1).ok && flowers.w.econ.num(Res.Nectar) === nectar,
     'empty flowers cannot create nectar');
   const remaining = flowers.map.recoveryRemaining(field);
-  for (let i = 0; i < 100; i++) flowers.step(0.1);
+  ok(remaining > 0 && remaining <= DEFAULT_CONFIG.economy.flowerRecoverSec + 1e-6, 'flower recovery wait is short (about 3s)');
+  for (let i = 0; i < 10; i++) flowers.step(0.1);
   ok(field.stock === 0 && flowers.map.recoveryRemaining(field) < remaining,
     'empty flowers wait through a visible recovery interval');
   const decoded = decodeEnvelope(encodeEnvelope(flowers.state, DEFAULT_CONFIG.configVersion, 1)).state!;

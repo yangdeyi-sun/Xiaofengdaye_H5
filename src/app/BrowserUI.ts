@@ -190,6 +190,16 @@ export class BrowserUI {
   private holdField = '';
   private holdAcc = 0;
   private lastHoldTick = 0;
+  /** 本次按下是否已经在花丛上采过蜜（按下即采一次，松手不再重复） */
+  private holdCollected = false;
+  private holdEnabledOnDown = false;
+  private lastTapAt = 0;
+  private lastTapX = 0;
+  private lastTapY = 0;
+  /** 触屏点开面板后浏览器会补发一次 click，落在刚出现的遮罩上把面板又关掉；在此之前忽略遮罩点击 */
+  private suppressScrimUntil = 0;
+  /** 侧栏的上一级面板（返回键逐级退回） */
+  private panelStack: string[] = [];
   private readonly drawerId = `browser-scene-${Math.random().toString(36).slice(2)}`;
   private unsubscribe: (() => void) | null = null;
 
@@ -222,6 +232,7 @@ export class BrowserUI {
       else if (this.deepTarget.length > 0) this.applyDeepTarget();
       else this.screen = 'home';
     }
+    if (this.screen === 'home') this.session.beginAway();
     this.render();
     history.replaceState(this.historyState(), '', location.href);
   }
@@ -257,19 +268,22 @@ export class BrowserUI {
   private onPopState(event: PopStateEvent): void {
     const state = event.state as Partial<ManagedHistoryState> | null;
     if (state?.xf === true && typeof state.screen === 'string') {
-      if (this.screen === 'game' && state.screen !== 'game') this.session.saveNow();
+      if (this.screen === 'game' && state.screen !== 'game') { this.session.saveNow(); this.session.beginAway(); }
+      if (this.screen !== 'game' && state.screen === 'game') this.session.endAway();
       this.screen = state.screen as Screen;
       this.view = state.view === 'hive' ? 'hive' : 'field';
       this.panel = typeof state.panel === 'string' ? state.panel : '';
       this.legal = (['privacy', 'agreement', 'help'].includes(String(state.legal)) ? state.legal : '') as LegalKind;
       this.drawerOpen = this.panel.length > 0;
+      this.panelStack = [];
       if (this.screen === 'privacy' && this.engine().state.meta.settings.privacyAccepted) this.screen = 'home';
       this.render();
       return;
     }
     if (this.legal.length > 0) this.legal = '';
+    else if (this.panelStack.length > 0) this.panel = this.panelStack.pop() ?? '';
     else if (this.panel.length > 0) { this.panel = ''; this.drawerOpen = false; }
-    else if (this.screen === 'game') { this.session.saveNow(); this.screen = 'home'; }
+    else if (this.screen === 'game') { this.session.saveNow(); this.screen = 'home'; this.session.beginAway(); }
     this.render();
     history.pushState(this.historyState(), '', location.href);
   }
@@ -346,9 +360,12 @@ export class BrowserUI {
       this.root.innerHTML = `<main id="game-screen" class="game-screen">
         <canvas id="scene-canvas" class="scene-canvas" tabindex="0" aria-label="游戏场景"></canvas>
         <div id="drawer-scrim" class="drawer-scrim" data-action="close-panel"></div>
-        <header id="top-bar" class="top-bar"></header>
-        <div id="hint-line" class="hint-wrap"></div>
-        <div id="placing-bar" class="placing-wrap"></div>
+        <div class="hud-stack">
+          <header id="top-bar" class="top-bar"></header>
+          <div id="prod-strip" class="prod-wrap"></div>
+          <div id="hint-line" class="hint-wrap"></div>
+          <div id="placing-bar" class="placing-wrap"></div>
+        </div>
         <div id="field-mini" class="field-mini-wrap"></div>
         <button id="view-toggle" class="view-toggle" type="button" data-action="toggle-view"></button>
         <aside id="game-drawer" class="game-drawer" aria-label="功能面板">
@@ -356,7 +373,7 @@ export class BrowserUI {
           <div class="drawer-main"><div class="drawer-header">
             <button type="button" class="drawer-view" data-action="toggle-view"></button>
             <span class="drawer-spacer"></span>
-            <button type="button" class="round-btn" data-action="exit-home" aria-label="返回首页">${icon('xf_action_back')}</button>
+            <button type="button" id="panel-back" class="round-btn" data-action="panel-back" aria-label="返回上一级">${icon('xf_action_back')}</button>
             <button type="button" class="round-btn" data-action="close-panel" aria-label="收起面板">${icon('xf_action_close')}</button>
           </div><div id="panel-host" class="panel-host"></div></div>
         </aside>
@@ -377,6 +394,8 @@ export class BrowserUI {
     this.canvas.addEventListener('pointermove', (event) => this.onCanvasMove(event));
     this.canvas.addEventListener('pointerup', (event) => this.onCanvasUp(event));
     this.canvas.addEventListener('pointercancel', (event) => this.onCanvasUp(event));
+    // 阻止触屏在 touchend 后补发的 click：它会落到刚打开的面板遮罩上，把面板立刻关掉
+    this.canvas.addEventListener('touchend', (event) => { if (event.cancelable) event.preventDefault(); }, { passive: false });
     this.canvas.addEventListener('wheel', (event) => {
       if (this.view !== 'field' || this.session.renderer === null) return;
       event.preventDefault();
@@ -434,6 +453,10 @@ export class BrowserUI {
     }
     Sprites.probeCanvas(ctx);
     ctx.clearRect(0, 0, this.canvasWidth, this.canvasHeight);
+    const hud = this.root.querySelector<HTMLElement>('.hud-stack');
+    if (hud !== null && this.canvas !== null) {
+      renderer.hudTop = hud.getBoundingClientRect().bottom - this.canvas.getBoundingClientRect().top + 4;
+    }
     if (this.view === 'field') renderer.drawField(ctx, this.canvasWidth, this.canvasHeight);
     else renderer.drawHive(ctx, this.canvasWidth, this.canvasHeight);
   }
@@ -452,10 +475,19 @@ export class BrowserUI {
     if (this.pointers.size === 1) {
       this.downX = point.x; this.downY = point.y; this.lastX = point.x; this.lastY = point.y;
       this.downAt = Date.now(); this.lastHoldTick = this.downAt; this.holdAcc = 0;
-      this.dragging = false; this.multiTouch = false; this.pinchDistance = 0;
+      this.dragging = false; this.multiTouch = false; this.pinchDistance = 0; this.holdCollected = false;
       if (this.view === 'field') {
         const hit = this.session.renderer.hitField(point.x, point.y, this.canvasWidth, this.canvasHeight);
         this.holdField = hit.length > 0 && hit !== 'hive' ? hit : '';
+        // 按在花丛上立刻采一次，按住不放则持续采集
+        if (this.holdField.length > 0) {
+          this.holdEnabledOnDown = this.engine().run.stats.manualCollects >= 2;
+          if (this.drawerOpen) this.closePanel(false);
+          const result = this.engine().collect(this.holdField, 1);
+          if (!result.ok) this.feedback(result);
+          this.holdCollected = true;
+          this.selectedField = this.holdField;
+        }
       }
     } else if (this.pointers.size >= 2) {
       this.multiTouch = true; this.dragging = true; this.holdField = '';
@@ -492,14 +524,24 @@ export class BrowserUI {
     const renderer = this.session.renderer;
     if (!this.pointers.has(event.pointerId) || renderer === null) return;
     event.preventDefault();
-    const held = Date.now() - this.downAt;
-    const wasHold = this.holdField.length > 0 && held >= 350;
+    const collected = this.holdCollected;
     this.pointers.delete(event.pointerId);
     if (this.pointers.size > 0) return;
     this.holdField = '';
-    if (event.type === 'pointercancel' || this.dragging || this.multiTouch || wasHold) return;
+    this.holdCollected = false;
+    if (event.type === 'pointercancel' || this.dragging || this.multiTouch) return;
+    this.suppressScrimUntil = Date.now() + 450;
     if (this.view === 'field') {
+      if (collected) { this.refreshGame(true); return; }
+      const now = Date.now();
       const hit = renderer.hitField(this.downX, this.downY, this.canvasWidth, this.canvasHeight);
+      // 双击空地缩放地图：放大到点击处，已放大时恢复默认视野
+      if (hit.length === 0 && now - this.lastTapAt < 320 && Math.hypot(this.downX - this.lastTapX, this.downY - this.lastTapY) < 40) {
+        this.lastTapAt = 0;
+        renderer.doubleTapZoom(this.downX, this.downY, this.canvasWidth, this.canvasHeight);
+        return;
+      }
+      this.lastTapAt = now; this.lastTapX = this.downX; this.lastTapY = this.downY;
       this.onTapField(hit);
     } else {
       const hit = renderer.hitCell(this.downX, this.downY, this.canvasWidth, this.canvasHeight);
@@ -508,10 +550,11 @@ export class BrowserUI {
   }
 
   private holdTick(): void {
-    if (this.holdField.length === 0 || this.pointers.size !== 1) return;
+    if (!this.holdEnabledOnDown || this.holdField.length === 0 || this.pointers.size !== 1 || this.dragging) return;
     const now = Date.now();
     const e = this.engine();
-    if (now - this.downAt < 350 || !e.w.unlocked('t_first_scout')) {
+    // 按住约 0.25 秒后开始连续采集（按下那一下已经采过一次）
+    if (now - this.downAt < 250) {
       this.lastHoldTick = now;
       return;
     }
@@ -519,6 +562,9 @@ export class BrowserUI {
     this.lastHoldTick = now;
     while (this.holdAcc >= 1) {
       this.holdAcc -= 1;
+      const field = e.w.field(this.holdField);
+      // 花丛采空时停在原地等它重新开花，不连续弹出失败提示
+      if (field === null || field.stock <= 1e-6) { this.holdAcc = 0; break; }
       e.collect(this.holdField, 1);
     }
   }
@@ -526,7 +572,7 @@ export class BrowserUI {
   private onTapField(id: string): void {
     if (this.drawerOpen) this.closePanel(false);
     if (id.length === 0) { this.selectedField = ''; this.refreshGame(true); return; }
-    if (id === 'hive') { this.placing = ''; this.openPanel('hub'); return; }
+    if (id === 'hive') { this.enterHive(); return; }
     const result = this.engine().collect(id, 1);
     if (!result.ok) this.feedback(result);
     this.selectedField = id;
@@ -550,7 +596,47 @@ export class BrowserUI {
     if (id.length === 0) { this.selectedCell = ''; this.refreshGame(true); return; }
     const cell = e.hive.cell(id);
     this.selectedCell = id;
-    this.openPanel(cell !== null && cell.building === Bld.Queen ? 'queen' : 'cell');
+    // 外圈带“+”的格子：蜂蜡够就直接扩建，不够再打开详情说明还差多少
+    if (cell !== null && this.cellMode(cell) === 'expand' && e.w.econ.canAfford(e.hive.expandCost(cell))) {
+      const result = e.expand(id);
+      this.feedback(result);
+      if (result.ok) { this.focusTarget = ''; this.focusUntil = 0; }
+      this.refreshGame(true);
+      return;
+    }
+    this.panelStack = [];
+    this.openPanel(cell !== null && cell.building === Bld.Queen ? 'queen' : 'cell', true, true);
+  }
+
+  /** 进入蜂巢内部视图 */
+  private enterHive(): void {
+    this.view = 'hive';
+    this.placing = '';
+    this.selectedField = '';
+    this.closePanel(false);
+    this.session.audio.play('ui_tab');
+    this.refreshGame(true);
+    this.writeHistory(false);
+  }
+
+  /** 扩建离蜂后最近的一格（侧栏“扩建一格”） */
+  private expandNext(): void {
+    const e = this.engine();
+    const candidates = e.run.hive.cells.filter((cell) => e.hive.canExpandCell(cell)).sort((a, b) => a.ring - b.ring);
+    if (!e.w.unlocked('t_build_storage')) { this.showToast('建成第一个储蜜格后才能扩建', true); return; }
+    if (candidates.length === 0) { this.showToast('已达本种区蜂巢上限', true); return; }
+    const affordable = candidates.find((cell) => e.w.econ.canAfford(e.hive.expandCost(cell)));
+    if (affordable === undefined) {
+      this.showToast(`蜂蜡不足：扩建需要 ${costStr(e.hive.expandCost(candidates[0]))}`, true);
+      return;
+    }
+    const result = e.expand(affordable.cellId);
+    this.feedback(result);
+    if (result.ok) {
+      this.view = 'hive';
+      this.selectedCell = affordable.cellId;
+      this.focusTarget = `cell:${affordable.cellId}`; this.focusUntil = Date.now() + 2500;
+    }
   }
 
   private onSessionTick(): void {
@@ -707,6 +793,7 @@ export class BrowserUI {
     drawer?.classList.toggle('open', this.drawerOpen);
     scrim?.classList.toggle('visible', this.drawerOpen);
     this.setHtml('#top-bar', this.renderTopBar());
+    this.setHtml('#prod-strip', this.renderProdStrip());
     this.setHtml('#hint-line', this.renderHintLine());
     this.setHtml('#placing-bar', this.renderPlacingBar());
     this.setHtml('#field-mini', this.renderFieldMini());
@@ -714,6 +801,8 @@ export class BrowserUI {
     const drawerView = this.root.querySelector<HTMLElement>('.drawer-view');
     if (drawerView !== null) drawerView.innerHTML = `${icon(this.view === 'field' ? 'xf_nav_hive' : 'xf_flower_wild')} ${this.view === 'field' ? '进入蜂巢' : '返回花田'}`;
     this.setHtml('#drawer-nav', this.renderDrawerNav());
+    const back = this.root.querySelector<HTMLElement>('#panel-back');
+    if (back !== null) back.hidden = this.panel === 'hub' && this.panelStack.length === 0;
     const now = Date.now();
     // 玩家正在滚动面板时暂停定时重绘，滚动结束后再刷新数据
     const scrolling = now - this.lastScrollAt < 900;
@@ -724,7 +813,7 @@ export class BrowserUI {
     const handle = this.root.querySelector<HTMLElement>('#drawer-handle');
     if (handle !== null) {
       const badge = this.badgeCount();
-      handle.innerHTML = `${icon('xf_nav_hive')}<span>${this.drawerOpen ? '›' : '‹'}</span>${badge > 0 ? `<b>${badge}</b>` : ''}`;
+      handle.innerHTML = `${icon('xf_nav_comb')}<span>${this.drawerOpen ? '›' : '‹'}</span>${badge > 0 ? `<b>${badge}</b>` : ''}`;
       handle.setAttribute('aria-label', this.drawerOpen ? '收起功能面板' : '打开功能面板');
     }
     this.setHtml('#runtime-overlays', this.renderRuntimeOverlays());
@@ -800,6 +889,52 @@ export class BrowserUI {
       ? `<button class="boost-chip active" data-action="open-boost">⚡${boost}× <small>${clock(this.session.ads.boostRemainingSec())}</small></button>`
       : `<button class="boost-chip" data-action="open-boost">⚡加速</button>`;
     return `${boostChip}<button class="season-chip" data-action="open-panel" data-id="eco">${icon(seasonIcon(season.season), seasonName(season.season))}<span><b>${h(seasonName(season.season))}</b>${season.formal ? `<small>${formatDuration(e.season.remaining())}</small>` : ''}</span></button>${alert}<button class="resource-scroll" data-action="open-resources">${resources}</button>`;
+  }
+
+  /** 工种巢房的等级：该巢房全部属性升级等级之和 */
+  private buildingLevel(building: string): number {
+    const e = this.engine();
+    return e.w.cfg.tracks.filter((track) => track.building === building)
+      .reduce((sum, track) => sum + e.hive.trackLevel(track.id), 0);
+  }
+
+  /** 资源栏下方的产线条：采蜜 → 酿蜜 → 蜂蜜，以及各蜂种数量、等级和运行效率 */
+  private renderProdStrip(): string {
+    const e = this.engine();
+    const rate = e.rateView;
+    const nectarIn = rate.nectarIn + rate.manualIn;
+    const capacity = e.prod.baseConvertCapacity() + e.prod.brewCapacity();
+    const used = rate.nectarUse;
+    const load = capacity > 0 ? Math.max(0, Math.min(1, used / capacity)) : 0;
+    const stock = e.w.econ.num(Res.Nectar);
+    let state = '';
+    if (stock > 1 && load >= 0.95) state = nectarIn > used * 1.05 ? '酿不完' : '满负荷';
+    else if (stock <= 1 && nectarIn < capacity * 0.5) state = '缺花蜜';
+    const flow = `<div class="prod-flow">
+      <span class="prod-node">${icon('xf_res_nectar', '花蜜')}<b>采蜜</b><em>+${num1(nectarIn)}/秒</em></span>
+      <span class="prod-bar" title="酿蜜效率"><i style="width:${Math.round(load * 100)}%"></i><span>酿蜜 ${num1(used)}/秒 · 负荷 ${pct(load)}${state.length > 0 ? ` · ${h(state)}` : ''}</span></span>
+      <span class="prod-node">${icon('xf_res_honey', '蜂蜜')}<b>蜂蜜</b><em>+${num1(rate.honeyIn)}/秒</em></span>
+    </div>`;
+    const chips: string[] = [];
+    const known = e.map.knownFields().length;
+    const split = e.prod.houseSplit();
+    const roleLine: Record<string, string> = {
+      [Role.Forager]: `运蜜 ${num1(rate.nectarIn)}/秒`,
+      [Role.House]: `酿蜜 ${split[0]}/${e.prod.brewSlots()} · 产能${num1(e.prod.brewCapacity())}/秒${split[1] > 0 ? ` · 筑巢 ${split[1]}` : ''}`,
+      [Role.Scout]: `发现效率${num1(e.w.attrs.get('scout.discovery'))}倍 · 花田${known}`,
+      [Role.Guard]: `攻击效率${num1(e.w.attrs.get('guard.attack'))}倍 · 敌害${e.threats.activeList().length}`
+    };
+    [Role.Forager, Role.House, Role.Scout, Role.Guard].forEach((role) => {
+      const building = e.w.roleDef(role).building;
+      if (e.w.role(role) === 0 && e.w.count(building) === 0) return;
+      const injured = e.w.injured(role);
+      chips.push(`<span class="prod-chip">${icon(roleIcon(role))}<b>${h(e.w.roleDef(role).name)} ${e.w.role(role)}</b><small>Lv${this.buildingLevel(building)} · ${h(roleLine[role] ?? '')}${injured > 0 ? ` · 休养${injured}` : ''}</small></span>`);
+    });
+    if (e.w.count(Bld.Brewery) > 0) {
+      chips.splice(Math.min(1, chips.length), 0, `<span class="prod-chip">${icon('xf_building_brewery')}<b>酿蜜房 ${e.w.count(Bld.Brewery)}</b><small>Lv${this.buildingLevel(Bld.Brewery)} · 产能 ${num1(capacity)}/秒</small></span>`);
+    }
+    const action = e.colony.roleAvailable(Role.Forager) || e.colony.roleAvailable(Role.House) ? 'colony' : 'resources';
+    return `<button type="button" class="prod-strip" data-action="open-panel" data-id="${action}">${flow}${chips.length > 0 ? `<div class="prod-chips">${chips.join('')}</div>` : ''}</button>`;
   }
 
   private visibleHints(): Hint[] {
@@ -900,7 +1035,8 @@ export class BrowserUI {
     const queen = panelCard(`<div class="card-head large-icon">${icon('xf_nav_queen')}<div><h3>蜂后</h3><p>${h(`孵化新卵消耗 ${costStr(e.colony.eggCost())}${e.run.colony.layCooldown > 0 ? ` · 休息 ${Math.ceil(e.run.colony.layCooldown)} 秒` : ''}`)}</p><small>手动孵化，亲自选择工种分化</small></div>${button('lay', '孵化新卵', { primary: true, disabled: !e.colony.canLay().ok })}</div>${roles.length > 0 ? `<div class="quick-row"><span>培养</span>${roleButtons}</div>` : ''}<button class="text-link" data-action="open-panel" data-id="queen">蜂后详情、分化与蜂后室升级 ›</button>`);
     const buildings = built.map((def) => panelCard(`<button class="list-button" data-action="open-upgrade" data-id="${h(def.id)}">${icon(bldIcon(def.id))}<span><b>${h(def.name)}${e.w.count(def.id) > 1 ? ` ×${e.w.count(def.id)}` : ''}</b></span>${this.upgradeReady(def.id) ? '<em>可升级</em>' : ''}<i>升级 ›</i></button>`)).join('');
     const newBuildings = newly.length === 0 ? '' : `<h3 class="section-title">新开放的巢房</h3>${newly.map((def) => `<div class="compact-row">${icon(bldIcon(def.id))}<span><b>${h(def.name)}</b><small>${h(costStr(e.hive.buildCost(def.id)))}</small></span>${button('start-place', '放置', { id: def.id })}</div>`).join('')}`;
-    return this.panelFrame('蜂巢', 'xf_nav_hive', `<p>蜂群 ${e.w.adults()} 只 · 上限 ${e.w.popCap()} · 幼虫 ${e.run.colony.larvae}</p>${queen}<h3 class="section-title">巢房</h3>${buildings}${newBuildings}${button('enter-hive', '进入蜂巢 ›', { primary: true })}`);
+    const expandRow = e.w.unlocked('t_build_storage') ? `<div class="compact-row">${icon('xf_action_expand')}<span><b>扩建蜂巢</b><small>${h(e.run.hive.cells.some((cell) => e.hive.canExpandCell(cell)) ? `下一格 ${costStr(e.hive.expandCost(e.run.hive.cells.filter((cell) => e.hive.canExpandCell(cell)).sort((a, b) => a.ring - b.ring)[0]))}` : '已达本种区上限')}</small></span>${button('expand-next', '扩建一格')}</div>` : '';
+    return this.panelFrame('蜂巢', 'xf_nav_hive', `<p>蜂群 ${e.w.adults()} 只 · 上限 ${e.w.popCap()} · 幼虫 ${e.run.colony.larvae}</p>${queen}<h3 class="section-title">巢房</h3>${buildings}${newBuildings}${expandRow}${button('enter-hive', '进入蜂巢 ›', { primary: true })}`);
   }
 
   private renderUpgradeList(building: string): string {
@@ -964,7 +1100,7 @@ export class BrowserUI {
       return panelCard(`<div class="card-head">${icon(roleIcon(role))}<div><h3>${h(e.w.roleDef(role).name)}</h3><p>${e.w.role(role)} 只${injured > 0 ? `（受伤休养 ${injured}）` : ''}${h(extra)}</p>${button('open-panel', '孵化与分化', { id: 'queen' })}</div></div>`);
     }).join('');
     let injuredTotal = 0;
-    ALL_ROLES.forEach((role) => { injuredTotal += e.w.injured(role); });
+    [Role.Forager, Role.House, Role.Scout, Role.Guard].forEach((role) => { injuredTotal += e.w.injured(role); });
     const need = Math.ceil(e.season.winterNeed());
     const have = Math.floor(e.w.econ.num(Res.Honey));
     const winter = e.run.season.formal
@@ -1003,7 +1139,9 @@ export class BrowserUI {
       }
       return panelCard(`<div class="card-head${unlocked ? '' : ' locked'}">${icon(bldIcon(def.id))}<div><h3>${h(unlocked ? def.name : `${def.name}（未开放）`)}</h3><p>${h(def.desc)}</p><small class="${can ? 'ok' : 'warning-text'}">${h(line)}</small></div>${available ? button('start-place', '放置', { id: def.id, primary: true, disabled: !can }) : ''}</div>`);
     }).join('');
-    const expand = `<div class="compact-row">${icon('xf_action_expand')}<span><b>扩建蜂巢</b><small>${e.w.unlocked('t_build_storage') ? '蜂巢外圈带“+”的格子，消耗蜂蜡扩建' : '建成第一个储蜜格后开放'}</small></span>${e.w.unlocked('t_build_storage') ? button('focus-expand', '去扩建') : ''}</div>`;
+    const nextExpand = e.run.hive.cells.filter((cell) => e.hive.canExpandCell(cell)).sort((a, b) => a.ring - b.ring)[0];
+    const expandCostText = nextExpand === undefined ? '已达本种区上限' : `下一格 ${costStr(e.hive.expandCost(nextExpand))}，现有蜂蜡 ${Math.floor(e.w.econ.num(Res.Wax))}`;
+    const expand = `<div class="compact-row">${icon('xf_action_expand')}<span><b>扩建蜂巢</b><small>${e.w.unlocked('t_build_storage') ? `点蜂巢外圈带“+”的格子即可扩建 · ${expandCostText}` : '建成第一个储蜜格后开放'}</small></span>${e.w.unlocked('t_build_storage') ? `${button('expand-next', '扩建一格', { primary: true })}${button('focus-expand', '去蜂巢选格')}` : ''}</div>`;
     return this.panelFrame('建造', 'xf_action_build', `<p class="muted">${free > 0 ? `选好巢房后，在蜂巢里点一个发光的空格放置（空格 ${free} 个）` : '蜂巢没有空格了：先扩建外圈的格子'}</p>${cards}<hr>${expand}`);
   }
 
@@ -1020,7 +1158,8 @@ export class BrowserUI {
     if (cell === null) return this.panelFrame('巢格', 'xf_nav_hive', '<p class="muted">巢格不存在或已经变化。</p>');
     if (mode === 'expand') {
       const can = e.w.unlocked('t_build_storage') && e.w.econ.canAfford(e.hive.expandCost(cell));
-      return this.panelFrame('扩建格子', 'xf_action_expand', `<p>第 ${cell.ring} 圈 · 消耗 ${h(costStr(e.hive.expandCost(cell)))}</p><p class="muted">扩建后可以建造新的巢房；外圈越大成本越高，同时提高人口上限。</p>${button('expand-cell', '确认扩建', { primary: true, disabled: !can })}`);
+      const short = e.reasonsForShortage(e.hive.expandCost(cell));
+      return this.panelFrame('扩建格子', 'xf_action_expand', `<p>第 ${cell.ring} 圈 · 消耗 ${h(costStr(e.hive.expandCost(cell)))}</p>${short.length > 0 ? `<p class="warning">${h(short)}：巢内工蜂筑巢会产出蜂蜡（「蜂群」里调整筑巢比例）</p>` : ''}<p class="muted">扩建后可以建造新的巢房；外圈越大成本越高，同时提高人口上限。</p>${button('expand-cell', '确认扩建', { primary: true, disabled: !can })}`);
     }
     if (mode === 'locked') {
       let text = '只能扩建与现有蜂巢相邻的格子';
@@ -1307,7 +1446,7 @@ export class BrowserUI {
       `<div class="setting-row">${icon(rowIcon)}<span><b>${h(label)}</b>${desc.length > 0 ? `<small>${h(desc)}</small>` : ''}</span>${this.toggleButton(key, on)}</div>`;
     const skins = e.w.cfg.skins.filter((skin: SkinDef) => e.state.meta.skins.includes(skin.id)).map((skin) =>
       `<button type="button" class="skin-choice${settings.skin === skin.id ? ' selected' : ''}" data-action="set-skin" data-id="${h(skin.id)}">${artImage(`skin_background_${skin.id}`, skin.name)}<span>${h(skin.name)}</span></button>`).join('');
-    return this.panelFrame('设置', 'xf_nav_settings', `<h3 class="section-title">音画</h3>${toggleRow('music', '背景音乐', '', settings.music, 'xf_action_music')}${toggleRow('sfx', '音效', '', settings.sfx, 'xf_action_sound')}${this.range('volume', 'musicVolume', settings.musicVolume, 0, 100, 5, `音乐音量 ${settings.musicVolume}%`)}${this.range('volume', 'effectsVolume', settings.effectsVolume, 0, 100, 5, `音效音量 ${settings.effectsVolume}%`)}${toggleRow('vibration', '振动', '浏览器和设备支持时使用', settings.vibration, 'xf_action_vibration')}${toggleRow('particles', '粒子特效', '关闭可降低功耗', settings.particles, 'xf_status_rare')}${toggleRow('reduceMotion', '减少动态效果', '降低动画速度与天气粒子', settings.reduceMotion, 'xf_action_pause')}${toggleRow('eventAnimations', '事件动画', '敌害与季节更替的非阻塞通告', settings.eventAnimations, 'xf_card_alarm')}${toggleRow('lowPower', '省电模式', '画面降为 30 帧、使用半尺寸美术', this.session.lowPower, 'xf_action_low_power')}<hr><h3 class="section-title">玩法</h3><div class="setting-row"><span><b>花潮加速</b><small>${this.session.ads.boostSpeed() > 1 ? `${this.session.ads.boostSpeed()}× 进行中，剩余 ${clock(this.session.ads.boostRemainingSec())}` : `看 1 个广告 2×，看 2 个广告 4×，持续 ${AD_REWARDS.boostMinutes} 分钟`}</small></span>${button('open-boost', '⚡ 加速')}</div>${toggleRow('ecoMode', '生态模式（工蜂寿命）', '开启后工蜂会自然老化，需要手动孵化并分化补员', settings.ecoMode, 'xf_nav_ecology')}<h3 class="section-title">蜂巢外观</h3><div class="skin-grid">${skins}</div><hr><h3 class="section-title">${icon('xf_action_help')} 帮助与说明</h3><div class="choice-row">${button('open-legal', '玩法帮助', { id: 'help' })}${button('open-legal', '隐私政策', { id: 'privacy' })}${button('open-legal', '用户协议', { id: 'agreement' })}</div><hr><h3 class="section-title">数据与隐私</h3><p class="muted">进度保存在本设备。清除进度会重新开始；删除全部数据会同时清除设置与隐私同意记录。</p><div class="choice-row">${button('confirm-reset-progress', '清除游戏进度', { danger: true })}${button('confirm-delete-all', `${icon('xf_action_delete')} 删除全部数据`, { danger: true })}</div><div class="about-row">${artImage('logo_mark', '小峰大业')}${artImage('app_icon', '应用图标')}<span><b>小峰大业</b><small>版本 0.4.0</small></span>${button('save-now', `${icon('xf_status_save')} 立即保存`)}</div>`);
+    return this.panelFrame('设置', 'xf_nav_settings', `<h3 class="section-title">音画</h3>${toggleRow('music', '背景音乐', '', settings.music, 'xf_action_music')}${toggleRow('sfx', '音效', '', settings.sfx, 'xf_action_sound')}${this.range('volume', 'musicVolume', settings.musicVolume, 0, 100, 5, `音乐音量 ${settings.musicVolume}%`)}${this.range('volume', 'effectsVolume', settings.effectsVolume, 0, 100, 5, `音效音量 ${settings.effectsVolume}%`)}${toggleRow('vibration', '振动', '浏览器和设备支持时使用', settings.vibration, 'xf_action_vibration')}${toggleRow('particles', '粒子特效', '关闭可降低功耗', settings.particles, 'xf_status_rare')}${toggleRow('reduceMotion', '减少动态效果', '降低动画速度与天气粒子', settings.reduceMotion, 'xf_action_pause')}${toggleRow('eventAnimations', '事件动画', '敌害与季节更替的非阻塞通告', settings.eventAnimations, 'xf_card_alarm')}${toggleRow('lowPower', '省电模式', '画面降为 30 帧、使用半尺寸美术', this.session.lowPower, 'xf_action_low_power')}<hr><h3 class="section-title">玩法</h3><div class="setting-row"><span><b>花潮加速</b><small>${this.session.ads.boostSpeed() > 1 ? `${this.session.ads.boostSpeed()}× 进行中，剩余 ${clock(this.session.ads.boostRemainingSec())}` : `看 1 个广告 2×，看 2 个广告 4×，持续 ${AD_REWARDS.boostMinutes} 分钟`}</small></span>${button('open-boost', '⚡ 加速')}</div>${toggleRow('ecoMode', '生态模式（工蜂寿命）', '开启后工蜂会自然老化，需要手动孵化并分化补员', settings.ecoMode, 'xf_nav_ecology')}<h3 class="section-title">蜂巢外观</h3><div class="skin-grid">${skins}</div><hr><h3 class="section-title">${icon('xf_action_help')} 帮助与说明</h3><div class="choice-row">${button('open-legal', '玩法帮助', { id: 'help' })}${button('open-legal', '隐私政策', { id: 'privacy' })}${button('open-legal', '用户协议', { id: 'agreement' })}</div><hr><h3 class="section-title">数据与隐私</h3><p class="muted">进度保存在本设备。清除进度会重新开始；删除全部数据会同时清除设置与隐私同意记录。</p><div class="choice-row">${button('confirm-reset-progress', '清除游戏进度', { danger: true })}${button('confirm-delete-all', `${icon('xf_action_delete')} 删除全部数据`, { danger: true })}</div><div class="about-row">${artImage('logo_mark', '小峰大业')}${artImage('app_icon', '应用图标')}<span><b>小峰大业</b><small>版本 0.5.0</small></span>${button('save-now', `${icon('xf_status_save')} 立即保存`)}</div><div class="choice-row home-row">${button('exit-home', `${icon('xf_action_back')} 保存并返回首页`)}</div>`);
   }
 
   private renderLegalOverlay(): string {
@@ -1356,6 +1495,9 @@ export class BrowserUI {
   }
 
   private renderIntroOverlay(topic: IntroTopic): string {
+    if (topic.id === 'handover') {
+      return `<div class="modal-layer intro-layer"><section class="modal-card intro-card handover-card">${artImage('app_icon', '蜂后', 'handover-art')}<p class="eyebrow">蜂后的托付</p><h2>${h(topic.title)}</h2>${topic.what.split('\n').map((line) => `<p>${h(line)}</p>`).join('')}<p class="handover-oath">${h(topic.use)}</p><div class="choice-row">${button('intro-done', '交给我吧', { primary: true })}</div></section></div>`;
+    }
     return `<div class="modal-layer intro-layer"><section class="modal-card intro-card"><div class="intro-icon">${icon(topic.icon)}</div><p class="eyebrow">新发现</p><h2>${h(topic.title)}</h2><h3>这是什么</h3><p>${h(topic.what)}</p><h3>有什么用</h3><p>${h(topic.use)}</p><div class="choice-row">${topic.focus.length > 0 || topic.view.length > 0 ? button('intro-show', '带我看看', { primary: true }) : ''}${button('intro-done', '知道了', { primary: topic.focus.length === 0 && topic.view.length === 0 })}</div></section></div>`;
   }
 
@@ -1388,6 +1530,7 @@ export class BrowserUI {
     const action = target.dataset.action ?? '';
     const id = target.dataset.id ?? '';
     const value = target.dataset.value ?? '';
+    const inPanel = target.closest('#panel-host') !== null;
     if (this.session.status === 'error' && action !== 'reload') {
       this.syncSessionStatus();
       return;
@@ -1412,12 +1555,15 @@ export class BrowserUI {
       case 'home-start': this.enterGame(); return;
       case 'home-panel': this.enterGame(id); return;
       case 'exit-home': this.exitHome(); return;
+      case 'panel-back': this.panelBack(); return;
       case 'drawer-toggle': if (this.drawerOpen) this.closePanel(); else this.openPanel(this.panel || 'hub'); return;
-      case 'close-panel': this.closePanel(); return;
-      case 'open-panel': this.openPanel(id); return;
+      case 'close-panel':
+        if (target.id === 'drawer-scrim' && Date.now() < this.suppressScrimUntil) return;
+        this.closePanel(); return;
+      case 'open-panel': this.openPanel(id, true, !inPanel); return;
       case 'open-resources': this.openPanel('resources'); return;
       case 'toggle-view': this.toggleView(); return;
-      case 'run-hint': this.runHint(id); return;
+      case 'run-hint': this.runHint(id, inPanel); return;
       case 'hide-hint': this.hiddenHint = id; break;
       case 'start-place': this.startPlacing(id); return;
       case 'cancel-place': this.cancelPlacing(); return;
@@ -1426,7 +1572,8 @@ export class BrowserUI {
       case 'lay': this.feedback(e.lay()); break;
       case 'hatch': this.feedback(e.differentiate(id, Number(value) || 1)); break;
       case 'cancel-batch': this.feedback(e.cancelBatch(Number(id))); break;
-      case 'open-upgrade': this.upgradeBuilding = id; this.openPanel('upgrade'); return;
+      case 'open-upgrade': this.upgradeBuilding = id; this.openPanel('upgrade', true, !inPanel); return;
+      case 'expand-next': this.expandNext(); break;
       case 'upgrade-tab': this.upgradeBuilding = id; break;
       case 'upgrade': this.feedback(e.upgrade(id)); break;
       case 'set-strategy': e.setStrategy(id); e.saveRequested = true; this.session.audio.play('ui_confirm'); break;
@@ -1585,6 +1732,7 @@ export class BrowserUI {
   }
 
   private enterGame(initialPanel = ''): void {
+    this.session.endAway();
     this.screen = 'game';
     this.panel = initialPanel;
     this.drawerOpen = initialPanel.length > 0;
@@ -1596,24 +1744,54 @@ export class BrowserUI {
 
   private exitHome(): void {
     if (!this.session.saveNow()) return;
-    this.panel = ''; this.drawerOpen = false; this.placing = ''; this.legal = '';
+    this.panel = ''; this.drawerOpen = false; this.placing = ''; this.legal = ''; this.panelStack = [];
     this.screen = 'home';
+    this.session.beginAway();
     this.render();
     this.writeHistory(true);
   }
 
-  private openPanel(key: string, push = true): void {
+  /** root：从侧栏导航、提示行、场景点开（清空上一级）；否则是从面板内部进入下一级，返回键可退回 */
+  private openPanel(key: string, push = true, root = true): void {
     if (this.screen !== 'game' || key.length === 0) return;
-    const wasClosed = this.panel.length === 0;
+    const wasClosed = this.panel.length === 0 || !this.drawerOpen;
+    if (root || wasClosed) this.panelStack = [];
+    else if (this.panel !== key) this.panelStack.push(this.panel);
     this.panel = key; this.drawerOpen = true;
     this.session.audio.play('ui_open_panel');
     this.refreshGame(true);
     this.writeHistory(push && wasClosed);
   }
 
+  /** 侧栏“返回”：回到点进来的上一级；已在最上层时回到蜂巢总览，总览再按返回则收起 */
+  private panelBack(): void {
+    const prev = this.panelStack.pop();
+    if (prev !== undefined) {
+      this.panel = prev;
+      this.session.audio.play('ui_tab');
+      this.refreshGame(true);
+      return;
+    }
+    if (this.panel !== 'hub') { this.openPanel('hub', false, true); return; }
+    this.closePanel();
+  }
+
+  /** Android 返回键先处理当前面板层级；没有可返回的界面时才交给原生退出确认。 */
+  handleNativeBack(): boolean {
+    if (this.legal) { this.legal = ''; this.render(); return true; }
+    if (this.screen !== 'game') return false;
+    if (this.introId) { this.closeIntro(false); return true; }
+    if (this.confirmState) { this.confirmState = null; this.refreshGame(true); return true; }
+    if (this.offlineReport) { this.offlineReport = null; this.session.dismissOffline(); this.refreshGame(true); return true; }
+    if (this.boostModal) { this.boostModal = false; this.refreshGame(true); return true; }
+    if (this.placing) { this.cancelPlacing(); return true; }
+    if (this.panel || this.drawerOpen) { this.panelBack(); return true; }
+    return false;
+  }
+
   private closePanel(write = true): void {
     const changed = this.panel.length > 0 || this.drawerOpen;
-    this.panel = ''; this.drawerOpen = false;
+    this.panel = ''; this.drawerOpen = false; this.panelStack = [];
     if (changed) this.session.audio.play('ui_close_panel');
     this.refreshGame(true);
     if (write) this.writeHistory(false);
@@ -1654,13 +1832,14 @@ export class BrowserUI {
     this.refreshGame(true);
   }
 
-  private runHint(action: string): void {
+  private runHint(action: string, inPanel = false): void {
     this.hiddenHint = '';
-    if (action === 'hub') this.openPanel('hub');
-    else if (action === 'queen') this.openPanel('queen');
-    else if (action.startsWith('panel:')) this.openPanel(action.substring(6));
+    const root = !inPanel;
+    if (action === 'hub') this.openPanel('hub', true, root);
+    else if (action === 'queen') this.openPanel('queen', true, root);
+    else if (action.startsWith('panel:')) this.openPanel(action.substring(6), true, root);
     else if (action.startsWith('build:')) this.startPlacing(action.substring(6));
-    else if (action.startsWith('upgrade:')) { this.upgradeBuilding = action.substring(8); this.openPanel('upgrade'); }
+    else if (action.startsWith('upgrade:')) { this.upgradeBuilding = action.substring(8); this.openPanel('upgrade', true, root); }
     else if (action.startsWith('intro:')) { this.introId = action.substring(6); this.introReplay = true; this.refreshGame(true); }
     else if (action.startsWith('focus:')) {
       const pair = action.substring(6).split('@');

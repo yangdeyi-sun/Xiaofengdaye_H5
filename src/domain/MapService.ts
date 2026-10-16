@@ -366,7 +366,8 @@ export class MapService {
 
   recoveryRemaining(f: FlowerField): number {
     if (f.depletedAt === undefined || f.stock > 1e-6) return 0;
-    return Math.max(0, f.depletedAt + 18 / this.w.attrs.get('scout.regrowth') - this.w.s.run.time);
+    const wait = this.w.cfg.economy.flowerRecoverSec ?? 3;
+    return Math.max(0, f.depletedAt + wait / this.w.attrs.get('scout.regrowth') - this.w.s.run.time);
   }
 
   private markDepleted(f: FlowerField): void {

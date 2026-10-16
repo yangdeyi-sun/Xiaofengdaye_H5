@@ -27,6 +27,9 @@ export class CanvasUI {
   private holdField = '';
   private nextHold = 0;
   private held = false;
+  private lastTapAt = 0;
+  private lastTapX = 0;
+  private lastTapY = 0;
   private ctx: CanvasRenderingContext2D;
   private width = 360;
   private height = 640;
@@ -51,8 +54,35 @@ export class CanvasUI {
     this.session.renderer?.fitDefault(this.width, this.sceneHeight());
   }
 
-  private sceneTop(): number { return this.top + 102; }
-  private sceneHeight(): number { return Math.max(80, this.height - this.sceneTop() - this.bottom - 106); }
+  private roleRows(): string[] {
+    if (!this.session.ready) return [];
+    const e = this.session.engine();
+    const efficiency: Record<string, string> = {
+      [Role.Forager]: `运蜜${e.rateView.nectarIn.toFixed(1)}/秒`,
+      [Role.House]: `酿蜜产能${e.prod.brewCapacity().toFixed(1)}/秒`,
+      [Role.Scout]: `发现效率${e.w.attrs.get('scout.discovery').toFixed(1)}倍`,
+      [Role.Guard]: `攻击效率${e.w.attrs.get('guard.attack').toFixed(1)}倍`
+    };
+    return e.w.cfg.roles.filter((r) => e.w.role(r.id) > 0 || e.w.count(r.building) > 0).map((r) => {
+      const level = e.w.cfg.tracks.filter((t) => t.building === r.building).reduce((n, t) => n + e.hive.trackLevel(t.id), 0);
+      return `${r.name}${e.w.role(r.id)}只 · Lv${level} · ${efficiency[r.id]}`;
+    });
+  }
+  private hintText(): string {
+    if (!this.session.ready) return '';
+    return this.placing ? `点空格放置${this.session.engine().w.bldDef(this.placing).name}，点此行取消` : this.session.guide().hints(1)[0]?.text || '';
+  }
+  private footerHeight(): number {
+    this.ctx.font = '12px sans-serif';
+    let lines = 1, current = '';
+    for (const ch of this.hintText()) {
+      if (this.ctx.measureText(current + ch).width > this.width - 24) { lines++; current = ch; }
+      else current += ch;
+    }
+    return Math.max(40, lines * 20 + 14);
+  }
+  private sceneTop(): number { return this.top + 146 + this.roleRows().length * 18; }
+  private sceneHeight(): number { return Math.max(40, this.height - this.sceneTop() - this.bottom - 54 - this.footerHeight()); }
   private text(text: string, x: number, y: number, size = 14, color = '#45301c'): void {
     this.ctx.fillStyle = color; this.ctx.font = `${size}px sans-serif`;
     this.ctx.textAlign = 'left'; this.ctx.textBaseline = 'top'; this.ctx.fillText(text, x, y);
@@ -103,6 +133,13 @@ export class CanvasUI {
     this.text('小峰大业', 14, this.top + 12, 21);
     this.text(`${seasonName(e.run.season.season)}  蜂群 ${e.w.population()}/${e.w.popCap()}`, 14, this.top + 43);
     this.text(`花蜜 ${formatBig(e.w.econ.amount(Res.Nectar))}   蜂蜜 ${formatBig(e.w.econ.amount(Res.Honey))}`, 14, this.top + 68, 16);
+    const capacity = e.prod.baseConvertCapacity() + e.prod.brewCapacity();
+    const load = capacity > 0 ? Math.min(1, e.rateView.nectarUse / capacity) : 0;
+    this.text(`采蜜 +${(e.rateView.nectarIn + e.rateView.manualIn).toFixed(1)}/秒 → 蜂蜜 +${e.rateView.honeyIn.toFixed(1)}/秒`, 14, this.top + 94, 12);
+    this.text(`酿蜜 ${e.rateView.nectarUse.toFixed(1)}/${capacity.toFixed(1)} 花蜜/秒 · 负荷${Math.round(load * 100)}%`, 14, this.top + 112, 12);
+    this.box(14, this.top + 131, this.width - 28, 5, '#d6c48d');
+    this.box(14, this.top + 131, (this.width - 28) * load, 5, '#b77a19');
+    this.roleRows().forEach((line, i) => this.text(line, 14, this.top + 143 + i * 18, 12));
     const renderer = s.renderer!;
     renderer.selectedCell = this.selected; renderer.selectedField = this.field; renderer.placing = this.placing;
     c.save(); c.translate(0, this.sceneTop());
@@ -110,7 +147,7 @@ export class CanvasUI {
     if (this.view === 'field') renderer.drawField(c, this.width, this.sceneHeight());
     else renderer.drawHive(c, this.width, this.sceneHeight());
     c.restore();
-    const y = this.height - this.bottom - 98;
+    const y = this.height - this.bottom - this.footerHeight() - 54;
     const nav = [['field', '花田'], ['hive', '蜂巢'], ['queen', '繁育'], ['build', '建造'], ['more', '管理']];
     nav.forEach(([id, name], i) => this.button(name, 6 + i * this.width / 5, y, this.width / 5 - 10, () => {
       if (id === 'field' || id === 'hive') { this.view = id; this.panel = ''; if (id === 'field') this.placing = ''; }
@@ -119,9 +156,9 @@ export class CanvasUI {
     }));
     const hint = s.guide().hints(1)[0];
     if (hint) {
-      this.box(0, y + 48, this.width, 50, '#fff5d3');
-      this.wrap(this.placing ? `点空格放置${e.w.bldDef(this.placing).name}，点此行取消` : hint.text, 12, y + 54, this.width - 24, 12);
-      this.buttons.push({ x: 0, y: y + 48, w: this.width, h: 50, enabled: true, run: () => { if (this.placing) this.placing = ''; else this.followHint(hint.action); } });
+      this.box(0, y + 48, this.width, this.footerHeight(), '#fff5d3');
+      this.wrap(this.hintText(), 12, y + 54, this.width - 24, 12);
+      this.buttons.push({ x: 0, y: y + 48, w: this.width, h: this.footerHeight(), enabled: true, run: () => { if (this.placing) this.placing = ''; else this.followHint(hint.action); } });
     }
     if (!this.intro && !s.pendingOffline && !this.placing && (!this.panel || e.state.meta.tutorialDone && !s.guide().seen('handover'))) {
       this.intro = s.guide().pendingIntro()?.id || '';
@@ -186,6 +223,10 @@ export class CanvasUI {
       e.run.colony.batches.forEach((b) => push(`${e.w.roleDef(b.targetRole).name} · ${b.started ? formatDuration(b.finishAt - e.run.time) : '排队中'}`,
         () => this.ask('取消分化？进行中的分化返还一半费用。', () => this.result(e.cancelBatch(b.batchId))), '取消分化'));
     } else if (this.panel === 'build') {
+      if (e.w.unlocked('t_build_storage')) {
+        const next = e.run.hive.cells.filter((c) => e.hive.canExpandCell(c)).sort((a, b) => a.ring - b.ring)[0];
+        if (next) push('扩建一格', () => this.result(e.expand(next.cellId)), this.cost(e.hive.expandCost(next)), e.w.econ.canAfford(e.hive.expandCost(next)));
+      }
       e.w.cfg.buildings.filter((b) => b.id !== Bld.Queen).forEach((b) => {
         const available = e.hive.buildingAvailable(b.id);
         const task = e.prog.taskDef(b.unlockTask);
@@ -294,9 +335,9 @@ export class CanvasUI {
     const guide = this.session.guide(), topic = guide.topic(this.intro);
     if (!topic) { this.intro = ''; return; }
     let y = this.sheet(topic.title, false); this.buttons = [];
-    y = this.wrap(topic.what, 22, y, this.width - 44, 16) + 18;
-    y = this.wrap(topic.use, 22, y, this.width - 44, 14);
-    this.button('知道了', 22, Math.min(y + 28, this.height - this.bottom - 70), this.width - 44, () => {
+    topic.what.split('\n').forEach((line) => { y = this.wrap(line, 22, y, this.width - 44, 16) + 8; });
+    y = this.wrap(topic.use, 22, y + 10, this.width - 44, 14);
+    this.button(topic.id === 'handover' ? '交给我吧' : '知道了', 22, Math.min(y + 28, this.height - this.bottom - 70), this.width - 44, () => {
       guide.markSeen(this.intro); this.intro = ''; this.session.saveNow();
     });
   }
@@ -321,9 +362,10 @@ export class CanvasUI {
     if (!this.session.ready || this.session.status === 'error') return;
     this.down = { x, y, moved: false }; this.held = false; this.holdField = '';
     if (this.view === 'field' && !this.panel && !this.intro && !this.confirm && !this.session.pendingOffline &&
-      this.session.engine().w.role(Role.Scout) > 0 && y > this.sceneTop() && y < this.sceneTop() + this.sceneHeight()) {
+      this.session.engine().run.stats.manualCollects >= 2 &&
+      y > this.sceneTop() && y < this.sceneTop() + this.sceneHeight()) {
       const id = this.session.renderer!.hitField(x, y - this.sceneTop(), this.width, this.sceneHeight());
-      if (id && id !== 'hive') { this.holdField = id; this.nextHold = Date.now() + 500; }
+      if (id && id !== 'hive') { this.holdField = id; this.nextHold = Date.now() + 250; }
     }
   }
   touchMove(x: number, y: number): void {
@@ -344,7 +386,12 @@ export class CanvasUI {
     const renderer = this.session.renderer!, e = this.session.engine(), sy = y - this.sceneTop();
     if (this.view === 'field') {
       const id = renderer.hitField(x, sy, this.width, this.sceneHeight());
-      if (id === 'hive') { this.view = 'hive'; this.open('queen'); }
+      const now = Date.now();
+      if (!id && now - this.lastTapAt < 320 && Math.hypot(x - this.lastTapX, y - this.lastTapY) < 40) {
+        this.lastTapAt = 0; renderer.doubleTapZoom(x, sy, this.width, this.sceneHeight()); this.draw(); return;
+      }
+      this.lastTapAt = now; this.lastTapX = x; this.lastTapY = y;
+      if (id === 'hive') { this.view = 'hive'; }
       else if (id) { this.field = id; this.result(e.collect(id, 1)); }
     } else {
       const id = renderer.hitCell(x, sy, this.width, this.sceneHeight());

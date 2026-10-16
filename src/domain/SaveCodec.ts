@@ -53,7 +53,7 @@ export interface SaveDTO {
 }
 
 export const SCHEMA_VERSION = 2;
-export const APP_VERSION = '0.4.0';
+export const APP_VERSION = '0.5.0';
 
 function bigOut(r: Record<string, BigNum>): Record<string, string> {
   const o: Record<string, string> = {};

@@ -34,8 +34,14 @@ export class ProductionService {
   brewCapacity(): number {
     const e = this.w.cfg.economy;
     const split = this.houseSplit();
-    return (this.w.count(Bld.Brewery) * 2 + split[0]) * e.houseBrewRate * this.w.attrs.get('house.brewSpeed') * this.w.attrs.get('house.batch') *
-      this.w.seasonDef().brewMul;
+    return (this.breweryUnits() * e.breweryRate + split[0] * e.houseBrewRate) * this.w.attrs.get('house.brewSpeed') *
+      this.w.attrs.get('house.batch') * this.w.seasonDef().brewMul;
+  }
+
+  /** 酿蜜房逐级提速：第 k 座提供 1 + 0.5 × (k - 1) 份基础产能 */
+  breweryUnits(): number {
+    const n = this.w.count(Bld.Brewery);
+    return n + 0.25 * n * (n - 1);
   }
 
   tick(dt: number): void {

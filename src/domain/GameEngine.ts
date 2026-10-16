@@ -368,9 +368,8 @@ export class GameEngine {
     const capSec = this.w.attrs.get('global.offlineHours') * 3600;
     const elapsed = Math.max(0, elapsedSec);
     const credited = Math.min(elapsed, capSec);
-    // 自动化尚未形成前，离线不产生收益，只推进少量基础转化
-    const autoReady = this.w.unlocked('t_auto_loop') || this.w.role(Role.Forager) > 0;
-    const effective = autoReady ? credited : Math.min(credited, 300);
+    // 离开期间蜂巢照常运转（采集、酿蜜、孵化中的幼虫），按离线收益上限结算
+    const effective = credited;
     const before: Record<string, BigNum> = {};
     ALL_RES.forEach((r: string) => {
       before[r] = this.w.econ.amount(r);
@@ -404,8 +403,8 @@ export class GameEngine {
     if (this.w.adults() > adultsBefore) {
       notes.push(`蜂群增加了 ${this.w.adults() - adultsBefore} 只`);
     }
-    if (!autoReady && credited > 300) {
-      notes.push('蜂巢尚未自行运转，离线只结算了 5 分钟的基础转化');
+    if (this.w.role(Role.Forager) === 0) {
+      notes.push('还没有采集蜂：离开期间只把存下的花蜜酿成了蜂蜜，培养采集蜂后离线也能持续采蜜');
     }
     const report: OfflineReport = {
       settlementId: settlementId, elapsed: elapsed, credited: effective, truncated: Math.max(0, elapsed - credited),

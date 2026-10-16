@@ -27,6 +27,7 @@ try {
 
 const ui = new BrowserUI(root, session);
 ui.mount();
+(window as unknown as { __xfHandleNativeBack: () => boolean }).__xfHandleNativeBack = () => ui.handleNativeBack();
 try { if (new URLSearchParams(location.search).get('debug') === '1') { (window as unknown as { __xfui: BrowserUI }).__xfui = ui; (window as unknown as { __xfSprites: typeof Sprites }).__xfSprites = Sprites; } } catch { /* ignore */ }
 
 if (session.ready && session.status !== 'error') session.start();
@@ -42,8 +43,10 @@ const unlockAudio = (): void => {
 document.addEventListener('pointerdown', unlockAudio, { capture: true });
 document.addEventListener('keydown', unlockAudio, { capture: true });
 
-platform().onHide(() => session.onBackground());
+let disposed = false;
+platform().onHide(() => { if (!disposed) session.onBackground(); });
 platform().onShow(() => {
+  if (disposed) return;
   if (!session.onForeground()) ui.syncSessionStatus();
 });
 
@@ -51,7 +54,6 @@ window.addEventListener('storage', (event) => {
   if (event.key === 'xiaofengdaye.h5.writer' && !session.ensureWriter()) ui.syncSessionStatus();
 });
 
-let disposed = false;
 window.addEventListener('beforeunload', () => {
   if (disposed) return;
   disposed = true;

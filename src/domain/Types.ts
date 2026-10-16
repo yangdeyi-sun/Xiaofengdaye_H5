@@ -280,6 +280,8 @@ export interface EconomyDef {
   baseConvertRate: number;
   perBeeConvert: number;
   baseConvertRatio: number;
+  /** 每座酿蜜房的基础加工量（花蜜/秒），后续酿蜜房逐级提高 */
+  breweryRate: number;
   houseBrewRate: number;
   houseConvertRatio: number;
   waxHoneyPerSec: number;
@@ -306,6 +308,8 @@ export interface EconomyDef {
   lifespan: number;
   scoutSample: number;
   holdCollectPerSec: number;
+  /** 花丛采空后重新开花的等待秒数（侦察房“花源恢复效率”会缩短） */
+  flowerRecoverSec: number;
   expandBaseWax: number;
   expandRingGrowth: number;
   expandCellGrowth: number;

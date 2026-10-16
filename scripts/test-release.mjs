@@ -66,10 +66,14 @@ async function verifyAssets(dir) {
 }
 await verifyAssets(path.join(root, 'dist-douyin'));
 // 发布模式不能通过 ?ads=mock 绕过真实广告；未配置广告不能获得观看完成奖励。
-const result = await build({ stdin: { contents: `import { WebPlatform } from './src/platform/web/WebPlatform'; import { MiniGamePlatform } from './src/platform/minigame/MiniGamePlatform'; export { WebPlatform, MiniGamePlatform };`, resolveDir: root }, bundle: true, write: false, platform: 'node', format: 'cjs', define: { __PRODUCTION__: 'true', ...legalDefines } });
+const result = await build({ stdin: { contents: `import { WebPlatform } from './src/platform/web/WebPlatform'; import { MiniGamePlatform } from './src/platform/minigame/MiniGamePlatform'; import { DEFAULT_CONFIG } from './src/domain/GameConfig'; export { WebPlatform, MiniGamePlatform, DEFAULT_CONFIG };`, resolveDir: root }, bundle: true, write: false, platform: 'node', format: 'cjs', define: { __PRODUCTION__: 'true', ...legalDefines } });
 const module = { exports: {} };
 const production = { module, exports: module.exports, location: { search: '?ads=mock' }, URLSearchParams, console };
 vm.runInNewContext(result.outputFiles[0].text, production);
+for (const track of module.exports.DEFAULT_CONFIG.tracks) {
+  const asset = path.join(root, 'public/media', `xf_stat_${track.id.replace('.', '_')}.svg`);
+  assert((await stat(asset)).isFile(), `缺少升级图标：${asset}`);
+}
 const web = new module.exports.WebPlatform();
 assert.equal((await web.ads.showRewarded('flower_boost')).status, 'unavailable');
 const mini = new module.exports.MiniGamePlatform({ name: 'douyin', api: sandbox.tt, adUnits: { rewarded: {}, rewardedDefault: '', interstitial: '' } });

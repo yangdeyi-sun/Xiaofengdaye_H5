@@ -1,4 +1,4 @@
-import { formatBig, formatDuration } from '../common/BigNum';
+import { BigNum, formatBig, formatDuration } from '../common/BigNum';
 import { hashSeed } from '../common/Rng';
 import { DEFAULT_CONFIG, validateConfig } from '../domain/GameConfig';
 import { GameEngine } from '../domain/GameEngine';
@@ -6,7 +6,7 @@ import { Guide } from '../domain/Guide';
 import { createInitialState, createRun } from '../domain/NewGame';
 import { cloneState, encodeEnvelope } from '../domain/SaveCodec';
 import type { GameMessage, GameState, OfflineReport } from '../domain/State';
-import { Res, Role, SeasonId } from '../domain/Types';
+import { ALL_RES, Res, Role, SeasonId } from '../domain/Types';
 import type { FxEvent } from '../domain/World';
 import { SceneRenderer } from '../scene/SceneRenderer';
 import { ArtEnv } from '../scene/Art';
@@ -20,6 +20,8 @@ import { AdService } from './ads/AdService';
 
 /** 隐私政策版本；改版后玩家会被重新要求同意 */
 export const PRIVACY_VERSION = '2026-10-16';
+/** 离开超过这个秒数，回来时弹出“离开期间收益” */
+export const AWAY_REPORT_SEC = 30;
 
 const SEASON_NAMES: Record<string, string> = {
   tutorial: '新手春季', spring: '春季', summer: '夏季', autumn: '秋季', winterPrep: '冬季将至', winter: '冬季'
@@ -66,6 +68,10 @@ export class GameSession {
   private audioView = 'field';
   private readonly drawers = new Map<string, () => void>();
   private readonly uiListeners = new Set<() => void>();
+  private awaySince = 0;
+  private awayStart: Record<string, BigNum> = {};
+  private awayAdults = 0;
+  private awayPriorReport: OfflineReport | null = null;
 
   constructor() {
     this.ads.onAdStart = () => {
@@ -319,15 +325,54 @@ export class GameSession {
     if (this.eng === null) return;
     const state = this.eng.state;
     const elapsed = TimeService.offlineElapsed(state.lastSavedAt, DEFAULT_CONFIG.economy.maxOfflineDays);
-    if (elapsed.elapsedSec < 60 && elapsed.anomaly.length === 0) return;
+    // 短暂切到后台也照常结算，避免这几秒的经营凭空消失；离开 30 秒以上才弹出收益报告
+    if (elapsed.elapsedSec < 5 && elapsed.anomaly.length === 0) return;
     const report = this.eng.settleOffline(elapsed.elapsedSec, `${state.lastSavedAt}`, elapsed.anomaly);
     state.lastSavedAt = TimeService.now();
-    if (report !== null && (report.credited >= 60 || report.anomaly.length > 0)) this.pendingOffline = report;
+    if (report !== null && (report.credited >= AWAY_REPORT_SEC || report.anomaly.length > 0)) this.pendingOffline = report;
     this.seenMessageId = state.nextMessageId;
     this.saveNow();
   }
 
   dismissOffline(): void { this.pendingOffline = null; }
+
+  /** 玩家离开经营画面（回到首页）时记下资源，回来时汇总这段时间蜂巢的收益 */
+  beginAway(): void {
+    if (this.eng === null || this.awaySince > 0) return;
+    this.awaySince = TimeService.now();
+    this.awayStart = {};
+    ALL_RES.forEach((res) => { this.awayStart[res] = this.engine().w.econ.amount(res); });
+    this.awayAdults = this.engine().w.adults();
+    this.awayPriorReport = this.pendingOffline;
+  }
+
+  endAway(): void {
+    if (this.eng === null || this.awaySince <= 0) return;
+    const engine = this.engine();
+    const elapsed = Math.max(0, (TimeService.now() - this.awaySince) / 1000);
+    const start = this.awayStart;
+    const prior = this.awayPriorReport;
+    this.awaySince = 0;
+    this.awayStart = {};
+    this.awayPriorReport = null;
+    if (elapsed < AWAY_REPORT_SEC && prior === null) return;
+    const gains: Record<string, string> = {};
+    ALL_RES.forEach((res) => {
+      // 首次打开时已结算的离线收益发生在 awayStart 之前；必须合并，不能被首页收益覆盖。
+      // 首页期间发生的后台结算已包含在当前库存差额中，不能重复累加。
+      gains[res] = engine.w.econ.amount(res).sub(start[res] ?? BigNum.of(0))
+        .add(BigNum.parse(prior?.gains[res] ?? '0')).serialize();
+    });
+    const prev = this.pendingOffline;
+    const notes = prev === null ? [] : prev.notes.filter((line) => !line.startsWith('蜂群增加了'));
+    if (engine.w.adults() > this.awayAdults) notes.push(`蜂群增加了 ${engine.w.adults() - this.awayAdults} 只`);
+    const truncated = (prior?.truncated ?? 0) + (prev !== null && prev !== prior ? prev.truncated : 0);
+    const totalElapsed = elapsed + (prior?.elapsed ?? 0);
+    this.pendingOffline = {
+      settlementId: `away:${Math.round(totalElapsed)}:${engine.state.lastSavedAt}`, elapsed: totalElapsed, credited: Math.max(0, totalElapsed - truncated),
+      truncated, gains, seasonsPassed: prev === null ? [] : prev.seasonsPassed, notes, anomaly: prev === null ? '' : prev.anomaly
+    };
+  }
 
   saveNow(): boolean {
     if (this.eng === null) return false;
@@ -411,6 +456,8 @@ export class GameSession {
     if (keepSettings) state.meta.settings = settings;
     this.useState(state);
     this.pendingOffline = null;
+    this.awaySince = 0;
+    this.awayPriorReport = null;
     this.saveNow();
   }
 

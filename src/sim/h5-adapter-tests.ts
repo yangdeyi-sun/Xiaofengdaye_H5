@@ -9,6 +9,8 @@ import { WebPlatform } from '../platform/web/WebPlatform';
 import { AdService } from '../app/ads/AdService';
 import { grantBearAid, grantOfflineDouble, grantSwarmBonus, grantWinterSupply, swarmBonusPoints } from '../app/ads/AdRewards';
 import { GameEngine } from '../domain/GameEngine';
+import { GameSession } from '../app/GameSession';
+import { BigNum } from '../common/BigNum';
 import { Res, ThreatType } from '../domain/Types';
 
 class MemoryStorage implements Storage {
@@ -155,7 +157,42 @@ setPlatform(androidPlatform);
 const restartedAndroidRepo = new BrowserSaveRepository();
 check(restartedAndroidRepo.claimWriter(), 'Android单实例重启可接管旧进程写入租约');
 restartedAndroidRepo.releaseWriter();
+const douyinPlatform = Object.create(web) as WebPlatform;
+Object.defineProperty(douyinPlatform, 'name', { value: 'douyin' });
+setPlatform(douyinPlatform);
+const oldMiniRepo = new BrowserSaveRepository();
+const newMiniRepo = new BrowserSaveRepository();
+check(oldMiniRepo.claimWriter() && newMiniRepo.claimWriter(), '小游戏冷启动可接管上次退出遗留的写入租约');
+newMiniRepo.releaseWriter();
 setPlatform(web);
+
+// 冷启动已有离线报告，停留首页再进入时不能把此前收入覆盖；首页期间后台收入不能重复累加。
+{
+  const session = new GameSession();
+  session.eng = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'away-report', Date.now(), 8));
+  session.eng.run.res[Res.Honey] = BigNum.of(50);
+  const report = {
+    settlementId: 'cold', elapsed: 10000, credited: 7200, truncated: 2800,
+    gains: { honey: '20' }, seasonsPassed: [], notes: [], anomaly: ''
+  };
+  session.pendingOffline = report;
+  session.beginAway();
+  (session as unknown as { awaySince: number }).awaySince -= 45000;
+  session.eng.run.res[Res.Honey] = BigNum.of(55);
+  session.endAway();
+  check(Math.abs(BigNum.parse(session.pendingOffline!.gains[Res.Honey]).toNumber() - 25) < 1e-6,
+    '首页收益汇总保留此前已结算的离线收入');
+  check(session.pendingOffline!.truncated === 2800 && session.pendingOffline!.credited >= 7245,
+    '合并报告保留离线上限截断和实际经营时间');
+  session.pendingOffline = null;
+  session.beginAway();
+  (session as unknown as { awaySince: number }).awaySince -= 60000;
+  session.eng.run.res[Res.Honey] = BigNum.of(65);
+  session.pendingOffline = { ...report, gains: { honey: '10' }, elapsed: 60, credited: 60, truncated: 0 };
+  session.endAway();
+  check(Math.abs(BigNum.parse(session.pendingOffline!.gains[Res.Honey]).toNumber() - 10) < 1e-6,
+    '首页期间后台结算的收入只计一次');
+}
 
 async function placeholderChecks(): Promise<void> {
   const r = await web.ads.showRewarded('offline_double');

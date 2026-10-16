@@ -133,10 +133,15 @@ small { color: var(--sub); }
 .game-screen { position: relative; width: 100%; height: 100%; overflow: hidden; background: #9fc777; }
 .scene-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 .scene-canvas:active { cursor: grabbing; }
-.top-bar {
+/* 顶部信息栏按列排布：资源栏 → 产线条 → 提示行 → 放置提示，任何屏幕宽度下都不会互相遮挡 */
+.hud-stack {
   position: absolute; top: max(8px, env(safe-area-inset-top)); left: 50%; z-index: 8;
-  display: flex; width: min(920px, calc(100% - 116px)); min-height: 58px;
-  align-items: stretch; gap: 8px; transform: translateX(-50%); pointer-events: none;
+  display: flex; width: min(920px, calc(100% - 132px)); flex-direction: column; align-items: center; gap: 6px;
+  transform: translateX(-50%); pointer-events: none;
+}
+.hud-stack > * { width: 100%; pointer-events: none; }
+.top-bar {
+  display: flex; min-height: 54px; align-items: stretch; gap: 8px; pointer-events: none;
 }
 .top-bar button, .top-bar .resource-chip { pointer-events: auto; }
 .season-chip, .resource-scroll, .status-alert {
@@ -151,12 +156,14 @@ small { color: var(--sub); }
 .status-alert b { position: absolute; top: -5px; right: -5px; min-width: 20px; padding: 2px 5px; border-radius: 20px; color: white; background: var(--danger); font-size: .7rem; }
 .resource-scroll { min-width: 0; flex: 1; overflow-x: auto; padding: 5px 8px; scrollbar-width: none; }
 .resource-scroll::-webkit-scrollbar { display: none; }
-.resource-chip { min-width: 94px; padding: 3px 7px; box-shadow: none; }
+.resource-chip { display: flex; min-width: 94px; flex: none; align-items: center; gap: 6px; padding: 3px 7px; box-shadow: none; }
+.resource-chip b { font-variant-numeric: tabular-nums; }
 .resource-chip.full b { color: var(--danger); }
 
-.hint-wrap, .placing-wrap, .field-mini-wrap { position: absolute; left: 50%; z-index: 7; width: min(620px, calc(100% - 130px)); transform: translateX(-50%); }
-.hint-wrap { top: max(76px, calc(env(safe-area-inset-top) + 74px)); }
-.placing-wrap { top: max(78px, calc(env(safe-area-inset-top) + 76px)); }
+.hint-wrap, .placing-wrap { max-width: 680px; }
+.hint-wrap:empty, .placing-wrap:empty, .prod-wrap:empty { display: none; }
+.hint-line, .placing-bar, .prod-strip { pointer-events: auto; }
+.field-mini-wrap { position: absolute; left: 50%; z-index: 7; width: min(620px, calc(100% - 130px)); transform: translateX(-50%); }
 .field-mini-wrap { bottom: max(18px, env(safe-area-inset-bottom)); }
 .hint-line, .placing-bar, .field-mini {
   display: flex; width: 100%; align-items: center; gap: 9px;
@@ -165,7 +172,7 @@ small { color: var(--sub); }
 .hint-line.warn { border-color: rgb(192 57 43 / 55%); background: rgb(255 235 221 / 97%); }
 .hint-main, .hint-close, .field-mini { border: 0; background: transparent; cursor: pointer; }
 .hint-main { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; padding: 9px 12px; }
-.hint-main span { flex: 1; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.hint-main span { flex: 1; text-align: left; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
 .hint-main b { color: var(--accent-dark); }
 .hint-close { padding: 9px; }
 .hint-close .ui-icon { width: 18px; height: 18px; }
@@ -173,6 +180,36 @@ small { color: var(--sub); }
 .placing-bar span { flex: 1; }
 .field-mini { justify-content: center; padding: 9px 14px; }
 .field-mini span { flex: 1; text-align: left; }
+
+/* 产线条：采蜜 → 酿蜜 → 蜂蜜，以及各蜂种的等级与效率 */
+.prod-strip {
+  display: grid; width: 100%; gap: 5px; padding: 6px 9px; border: 1px solid rgb(183 121 31 / 40%); border-radius: 15px;
+  background: rgb(255 248 231 / 92%); box-shadow: 0 5px 18px rgb(59 42 20 / 14%); text-align: left; cursor: pointer;
+}
+.prod-flow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.prod-node { display: flex; flex: none; align-items: center; gap: 4px; font-size: .78rem; white-space: nowrap; }
+.prod-node .ui-icon { width: 18px; height: 18px; }
+.prod-node em { color: var(--ok); font-style: normal; font-weight: 700; font-variant-numeric: tabular-nums; }
+.prod-bar { position: relative; min-width: 0; height: 22px; flex: 1; overflow: hidden; border-radius: 11px; background: #f1e2bf; }
+.prod-bar > i {
+  position: absolute; inset: 0 auto 0 0; border-radius: 11px;
+  background: repeating-linear-gradient(-45deg, #f2b53a 0 10px, #e8a317 10px 20px); background-size: 28px 28px;
+  animation: brew-flow 1.2s linear infinite; transition: width .4s ease;
+}
+.prod-bar > span { position: relative; display: block; overflow: hidden; padding: 0 9px; color: #4a3313; font-size: .72rem; font-weight: 700; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes brew-flow { to { background-position: 28px 0; } }
+.prod-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.prod-chips::-webkit-scrollbar { display: none; }
+.prod-chip { display: flex; flex: none; align-items: center; gap: 5px; padding: 2px 8px 2px 4px; border-radius: 10px; background: #fff1d0; font-size: .72rem; white-space: nowrap; }
+.prod-chip .ui-icon { width: 20px; height: 20px; }
+.prod-chip small { font-size: .68rem; }
+.handover-card { text-align: center; }
+.handover-card .handover-art { width: 96px; height: 96px; margin: 0 auto 12px; border-radius: 22px; }
+.handover-card p { line-height: 1.75; }
+.handover-oath { margin: 16px 0 18px; color: var(--accent-dark); font-size: 1.05rem; font-weight: 800; }
+.handover-card .choice-row { justify-content: center; }
+.home-row { margin-top: 12px; }
+.round-btn[hidden] { display: none; }
 
 .view-toggle {
   position: absolute; right: 22px; bottom: max(22px, env(safe-area-inset-bottom)); z-index: 7;
@@ -320,7 +357,8 @@ small { color: var(--sub); }
 .toast.error { background: rgb(145 38 28 / 96%); }
 
 @media (max-width: 760px) {
-  .top-bar { top: max(5px, env(safe-area-inset-top)); width: calc(100% - 14px); gap: 5px; }
+  .hud-stack { top: max(5px, env(safe-area-inset-top)); width: calc(100% - 14px); gap: 5px; }
+  .top-bar { gap: 5px; min-height: 50px; }
   .season-chip { padding: 5px 7px; }
   .season-chip .ui-icon { width: 22px; height: 22px; }
   .season-chip b { font-size: .76rem; }
@@ -328,14 +366,16 @@ small { color: var(--sub); }
   .resource-chip .ui-icon { width: 21px; height: 21px; }
   .resource-chip b { font-size: .78rem; }
   .status-alert { width: 40px; padding: 5px; }
-  .hint-wrap, .placing-wrap, .field-mini-wrap { width: calc(100% - 82px); }
-  .hint-wrap { top: max(69px, calc(env(safe-area-inset-top) + 67px)); }
-  .placing-wrap { top: max(69px, calc(env(safe-area-inset-top) + 67px)); }
+  .field-mini-wrap { left: 9px; width: calc(100% - 92px); transform: none; }
+
+  .prod-flow { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .prod-node:last-child { grid-column: 2; grid-row: 1; justify-content: flex-end; }
+  .prod-bar { grid-column: 1 / -1; grid-row: 2; width: 100%; }
   .view-toggle { right: 9px; bottom: max(12px, env(safe-area-inset-bottom)); min-width: 56px; }
   .game-drawer { top: auto; bottom: 0; width: 100%; height: min(78vh, 720px); grid-template-columns: 72px minmax(0, 1fr); transform: translateY(100%); border-radius: 22px 22px 0 0; }
   .game-drawer.open { transform: translateY(0); }
   .drawer-handle { top: auto; right: 0; bottom: 46%; width: 52px; min-height: 94px; transform: none; }
-  .drawer-open .drawer-handle { right: 0; bottom: min(78vh, 720px); }
+  .drawer-open .drawer-handle { display: none; }
   .drawer-nav { border-radius: 22px 0 0; }
   .nav-item { min-height: 53px; }
   .panel-scroll { padding: 13px 12px calc(20px + env(safe-area-inset-bottom)); }
@@ -351,7 +391,10 @@ small { color: var(--sub); }
   .resource-scroll { padding-inline: 3px; }
   .resource-chip { min-width: 70px; }
   .resource-chip small { display: none; }
-  .hint-main span { font-size: .78rem; }
+  .hint-main { padding: 7px 9px; }
+  .hint-main span { font-size: .8rem; }
+  .prod-node b { display: none; }
+  .prod-node { font-size: .74rem; }
   .field-mini { font-size: .78rem; }
   .home-shortcuts { grid-template-columns: 1fr; }
   .card-head { flex-wrap: wrap; }
@@ -393,4 +436,20 @@ small { color: var(--sub); }
 .mock-ad-count { color: var(--sub); font-variant-numeric: tabular-nums; }
 @media (max-width: 430px) {
   .boost-chip { padding: 5px 7px; font-size: .78rem; }
+}
+
+/* 平板与电脑：横屏时信息栏更宽，侧栏不挡住地图中央 */
+@media (min-width: 761px) and (max-width: 1100px) {
+  .game-drawer { width: min(560px, 70vw); }
+  .drawer-open .drawer-handle { right: min(560px, 70vw); }
+}
+@media (min-width: 1101px) {
+  .hud-stack { width: min(1000px, calc(100% - 200px)); }
+  .game-drawer { width: min(640px, 46vw); }
+  .drawer-open .drawer-handle { right: min(640px, 46vw); }
+}
+@media (max-height: 560px) and (orientation: landscape) {
+  .hud-stack { gap: 3px; }
+  .top-bar { min-height: 44px; }
+  .modal-card, .intro-card, .offline-card { max-height: 94vh; }
 }
