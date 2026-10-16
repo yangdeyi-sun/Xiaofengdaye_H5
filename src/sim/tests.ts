@@ -21,8 +21,8 @@ function ok(cond: boolean, name: string, extra = '') {
 
 // ---------- 配置 ----------
 ok(validateConfig(DEFAULT_CONFIG).length === 0, 'config schema valid', validateConfig(DEFAULT_CONFIG).join(';'));
-ok(DEFAULT_CONFIG.tutorial.length === 3 && DEFAULT_CONFIG.tutorial[2].doneTask === 't_build_scout',
-  'tutorial keeps only three forced steps');
+ok(DEFAULT_CONFIG.tutorial.length === 7 && DEFAULT_CONFIG.tutorial[6].doneTask === 't_build_storage',
+  'tutorial guides through the first storage cell (7 steps)');
 ok(DEFAULT_CONFIG.economy.overflowDecayPerMin === 0.005, 'overflow decay reduced to 0.5% per minute');
 ok(softExponent(40, 20) < 40 && softExponent(20, 20) === 20, 'segmented soft cap preserves threshold and softens tail');
 
@@ -302,6 +302,25 @@ if (legacyState !== null) {
   const lg = new Guide(new GameEngine(DEFAULT_CONFIG, legacyState));
   const first = lg.pendingIntro();
   ok(first === null || !['flowers', 'honey', 'queen', 'scout'].includes(first.id), 'guide: legacy save skips old intros', first?.id);
+}
+
+// ---------- 0.3 新手节奏：自动繁育为第一个储蜜格留蜂蜜 ----------
+{
+  const st = createInitialState(DEFAULT_CONFIG, 'reserve-test', 1000, 11);
+  const eng = new GameEngine(DEFAULT_CONFIG, st);
+  ['t_first_nectar', 't_first_egg', 't_build_scout', 't_first_scout', 't_first_dance', 't_build_forager', 't_first_forager',
+    't_auto_loop'].forEach((id) => st.run.tasksDone.push(id));
+  eng.setAuto(true, true);
+  // 5 只守卫蜂：高于紧急补员线，且不会带回花蜜，便于观察蜂蜜是否被产卵花掉
+  st.run.colony.roles[Role.Guard] = 5;
+  st.run.res[Res.Honey] = BigNum.of(150);
+  st.run.res[Res.Nectar] = BigNum.zero(); // 没有花蜜可酿，蜂蜜保持在储蜜格价格以下
+  const eggsBefore = st.run.colony.eggsLaid;
+  for (let i = 0; i < 300; i++) eng.step(0.1);
+  ok(st.run.colony.eggsLaid === eggsBefore, 'pacing: auto-lay saves honey for the first storage cell');
+  st.run.res[Res.Honey] = BigNum.of(390);
+  for (let i = 0; i < 300; i++) eng.step(0.1);
+  ok(st.run.colony.eggsLaid > eggsBefore, 'pacing: auto-lay resumes above the storage reserve');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

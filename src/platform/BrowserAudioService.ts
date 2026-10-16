@@ -1,12 +1,18 @@
-import { AUDIO_ALIASES, AUDIO_CUES } from '../infrastructure/AudioCatalog';
+import { BGM_TRACKS, resolveCue, resolveKey } from '../infrastructure/AudioCatalog';
+import type { SoundHandle } from './Platform';
+import { platform } from './Platform';
 
+/** 小游戏同时存在的音频实例数量有限，短音效并发上限 */
+const MAX_SHOTS = 4;
+
+/** 音乐、环境声、天气声的循环层，切换时交叉淡入淡出。底层播放器由平台层提供。 */
 class LoopLayer {
-  private audio: HTMLAudioElement | null = null;
+  private audio: SoundHandle | null = null;
   private path = '';
   private revision = 0;
   private fading = false;
   private desiredVolume = 0;
-  private readonly retiring = new Set<HTMLAudioElement>();
+  private readonly retiring = new Set<SoundHandle>();
 
   set(path: string, volume: number, active: boolean): void {
     const wanted = active ? path : '';
@@ -18,34 +24,32 @@ class LoopLayer {
       const revision = this.revision;
       this.path = wanted;
       if (wanted.length === 0) {
-        old?.pause();
-        this.retiring.forEach((audio) => audio.pause());
+        old?.dispose();
+        this.retiring.forEach((audio) => audio.dispose());
         this.retiring.clear();
         this.audio = null;
         this.fading = false;
         return;
       }
       if (old !== null) this.retiring.add(old);
-      const audio = new Audio(`./${wanted}`);
-      audio.loop = true;
-      audio.preload = 'auto';
+      const audio = platform().audio.create(wanted, true);
       audio.volume = 0;
       this.audio = audio;
       this.fading = true;
       void audio.play().catch(() => { /* A user gesture will retry playback. */ });
       let step = 0;
-      const timer = window.setInterval(() => {
+      const timer = setInterval(() => {
         if (revision !== this.revision) {
-          window.clearInterval(timer);
-          if (old !== null) { old.pause(); this.retiring.delete(old); }
+          clearInterval(timer);
+          if (old !== null) { old.dispose(); this.retiring.delete(old); }
           return;
         }
         step++;
         audio.volume = this.desiredVolume * Math.min(1, step / 15);
         if (old !== null) old.volume = oldVolume * Math.max(0, 1 - step / 15);
         if (step >= 15) {
-          window.clearInterval(timer);
-          old?.pause();
+          clearInterval(timer);
+          old?.dispose();
           if (old !== null) this.retiring.delete(old);
           this.fading = false;
         }
@@ -61,14 +65,30 @@ class LoopLayer {
   stop(): void {
     this.revision++;
     this.fading = false;
-    this.audio?.pause();
-    this.retiring.forEach((audio) => audio.pause());
+    this.audio?.dispose();
+    this.retiring.forEach((audio) => audio.dispose());
     this.retiring.clear();
     this.audio = null;
     this.path = '';
   }
 }
 
+/**
+ * 构建时由 scripts/build.mjs 注入实际存在的音频文件列表；缺少的文件直接静音，避免 404 和报错。
+ * 在没有注入的环境（测试）中视为全部可用。
+ */
+declare const __AUDIO_FILES__: string[] | undefined;
+const AVAILABLE: Set<string> | null = typeof __AUDIO_FILES__ !== 'undefined' ? new Set(__AUDIO_FILES__) : null;
+function audioAvailable(path: string): boolean {
+  return path.length > 0 && (AVAILABLE === null || AVAILABLE.has(path));
+}
+
+/**
+ * 声音分层（0.3）：只有一首背景音乐 + 少量音效。
+ * - 背景音乐：主页 / 游戏 / 冬季三选一；敌害来袭时只压低音量，不再切换成另一首曲子；
+ * - 音效：界面、玩家动作、事件提示三类，同一时间最多播放 MAX_SHOTS 个；
+ * - 不再播放环境声、天气声和蜜蜂自动行为的声音。
+ */
 export class BrowserAudioService {
   sfxOn = true;
   musicOn = true;
@@ -76,21 +96,13 @@ export class BrowserAudioService {
   private foreground = false;
   private permitted = false;
   private musicPath = '';
-  private normalMusicPath = '';
-  private ambiencePath = '';
-  private weatherPath = '';
-  private threatLevel = 0;
   private duckUntil = 0;
   private musicVolume = 0.8;
-  private ambientVolume = 0.65;
   private effectsVolume = 0.75;
   private readonly music = new LoopLayer();
-  private readonly ambience = new LoopLayer();
-  private readonly weather = new LoopLayer();
-  private readonly shots = new Set<HTMLAudioElement>();
+  private readonly shots = new Set<SoundHandle>();
   private readonly lastPlay = new Map<string, number>();
-  private readonly lastVariant = new Map<string, number>();
-  private lastCombatPlay = 0;
+  private lastEventAt = 0;
   private released = false;
 
   unlock(): void {
@@ -101,58 +113,52 @@ export class BrowserAudioService {
 
   play(name: string): void {
     if (this.released || !this.sfxOn || !this.foreground || !this.permitted) return;
-    const key = AUDIO_ALIASES[name] ?? name;
-    const cue = AUDIO_CUES[key];
-    if (cue === undefined) return;
+    const cue = resolveCue(name);
+    if (cue === null) return;
+    const key = resolveKey(name);
+    const file = cue.files[Math.floor(Math.random() * cue.files.length)];
+    if (!audioAvailable(file)) return;
     const now = Date.now();
-    if (key.startsWith('alert_')) {
-      this.duckUntil = now + 2200;
+    const previous = this.lastPlay.get(key);
+    if (previous !== undefined && now - previous < cue.cooldownMs) return;
+    // 事件提示之间至少间隔 1.2 秒，避免换季、任务、成就同时响成一片
+    if (cue.channel === 'event' && now - this.lastEventAt < 1200) return;
+    if (this.shots.size >= MAX_SHOTS) return;
+    this.lastPlay.set(key, now);
+    if (cue.channel === 'event') {
+      this.lastEventAt = now;
+      // 事件提示响起时压低背景音乐
+      this.duckUntil = now + 1800;
       this.syncLayers();
     }
-    const combat = ['guard_attack', 'bee_hurt', 'wasp_attack', 'web_trap', 'web_clear', 'moth_chew_loop', 'bear_step', 'bear_swipe'].includes(key);
-    if (combat && now - this.lastCombatPlay < 450) return;
-    const highFrequency = ['collect_flower', 'queen_lay_egg', 'hatch_shell', 'forager_pickup', 'forager_deliver'].includes(key);
-    const cooldown = highFrequency ? Math.max(180, cue.cooldownMs) : cue.cooldownMs;
-    const previous = this.lastPlay.get(key);
-    if (previous !== undefined && now - previous < cooldown) return;
-    let variant = Math.floor(Math.random() * cue.files.length);
-    if (cue.files.length > 1 && variant === this.lastVariant.get(key)) variant = (variant + 1) % cue.files.length;
-    this.lastPlay.set(key, now);
-    this.lastVariant.set(key, variant);
-    if (combat) this.lastCombatPlay = now;
-    const audio = new Audio(`./${cue.files[variant]}`);
+    const audio = platform().audio.create(file, false);
     audio.volume = Math.max(0, Math.min(1, cue.volume * this.effectsVolume));
     this.shots.add(audio);
-    const release = (): void => { this.shots.delete(audio); };
-    audio.addEventListener('ended', release, { once: true });
-    audio.addEventListener('error', release, { once: true });
+    const release = (): void => { this.shots.delete(audio); audio.dispose(); };
+    audio.onFinish(release);
     void audio.play().catch(release);
   }
 
-  setScene(screen: string, region: string, hive: boolean, weather: string): void {
+  /** weather === 'snow' 表示冬季，切换到冬季背景音乐；其余参数保留以兼容调用方 */
+  setScene(screen: string, _region: string, _hive: boolean, weather: string): void {
     if (this.released) return;
     this.permitted = screen === 'home' || screen === 'game';
-    const safeRegion = ['meadow', 'alpine', 'rainy', 'drought', 'rooftop'].includes(region) ? region : 'meadow';
-    this.normalMusicPath = `audio/v1/music/bgm_${screen === 'home' ? 'home' : safeRegion}.ogg`;
-    this.musicPath = screen === 'game' && this.threatLevel > 0
-      ? `audio/v1/music/bgm_${safeRegion === 'drought' ? 'alpine' : 'drought'}.ogg`
-      : this.normalMusicPath;
-    const ambience = hive || screen === 'home' ? 'hive' : (safeRegion === 'rainy' ? 'wetland' : safeRegion);
-    this.ambiencePath = `audio/v1/ambience/amb_${ambience}.ogg`;
-    this.weatherPath = screen === 'game' && !hive && ['rain', 'snow', 'autumn'].includes(weather)
-      ? `audio/v1/weather/weather_${weather}.ogg` : '';
+    let path = '';
+    if (screen === 'home') path = BGM_TRACKS.home;
+    else if (screen === 'game') path = weather === 'snow' ? BGM_TRACKS.winter : BGM_TRACKS.game;
+    this.musicPath = audioAvailable(path) ? path : '';
     if (!this.permitted) this.stopShots();
     this.syncLayers();
   }
 
-  setVolumes(music: number, ambient: number, effects: number): void {
+  /** ambient 参数已不再使用（环境声层已移除），保留签名兼容旧设置 */
+  setVolumes(music: number, _ambient: number, effects: number): void {
     this.musicVolume = Math.max(0, Math.min(1, music));
-    this.ambientVolume = Math.max(0, Math.min(1, ambient));
     this.effectsVolume = Math.max(0, Math.min(1, effects));
     this.syncLayers();
   }
 
-  setThreatLevel(level: number): void { this.threatLevel = Math.max(0, Math.floor(level)); }
+  setThreatLevel(_level: number): void { /* 敌害不再切换背景音乐 */ }
   setSfx(on: boolean): void { this.sfxOn = on; if (!on) this.stopShots(); this.syncLayers(); }
   setMusic(on: boolean): void { this.musicOn = on; this.syncLayers(); }
   resumeMusic(): void { if (!this.released) { this.foreground = true; this.syncLayers(); } }
@@ -166,20 +172,18 @@ export class BrowserAudioService {
   }
 
   vibrate(ms: number): void {
-    if (!this.released && this.vibrateOn && 'vibrate' in navigator) navigator.vibrate(ms);
+    if (!this.released && this.vibrateOn) platform().vibrate(ms);
   }
 
   private syncLayers(): void {
     if (this.released) return;
     const active = this.foreground && this.permitted;
-    const duck = Date.now() < this.duckUntil ? 0.42 : 1;
-    this.music.set(this.musicPath, 0.4 * this.musicVolume * duck, active && this.musicOn);
-    this.ambience.set(this.ambiencePath, 0.28 * this.ambientVolume * duck, active && this.sfxOn);
-    this.weather.set(this.weatherPath, 0.24 * this.ambientVolume * duck, active && this.sfxOn && this.weatherPath.length > 0);
+    const duck = Date.now() < this.duckUntil ? 0.45 : 1;
+    this.music.set(this.musicPath, 0.4 * this.musicVolume * duck, active && this.musicOn && this.musicPath.length > 0);
   }
 
   private stopShots(): void {
-    this.shots.forEach((audio) => { audio.pause(); audio.currentTime = 0; });
+    this.shots.forEach((audio) => audio.dispose());
     this.shots.clear();
   }
 
@@ -189,7 +193,5 @@ export class BrowserAudioService {
     this.foreground = false;
     this.stopShots();
     this.music.stop();
-    this.ambience.stop();
-    this.weather.stop();
   }
 }

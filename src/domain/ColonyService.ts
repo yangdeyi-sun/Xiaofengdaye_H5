@@ -300,6 +300,14 @@ export class ColonyService {
   private reserveHoney(): BigNum {
     const s = this.w.s.run.season.season;
     const adults = this.w.adults();
+    // 新手期：蜂巢开始自行运转后、第一个储蜜格建成前，自动繁育要给储蜜格留出蜂蜜，
+    // 否则产卵和培养会把蜂蜜花光，玩家怎么点都攒不够建储蜜格的钱
+    if (this.w.unlocked('t_auto_loop') && this.w.count(Bld.Storage) === 0) {
+      const cost = this.w.econ.costOf(this.w.bldDef(Bld.Storage).costs, 0, 1, 4);
+      if (cost.length > 0) {
+        return cost[0].amount;
+      }
+    }
     if (s === 'winterPrep' || s === 'winter') {
       return BigNum.of(adults * 3);
     }

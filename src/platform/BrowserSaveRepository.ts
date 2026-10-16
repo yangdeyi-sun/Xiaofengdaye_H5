@@ -1,4 +1,6 @@
 import { DecodeResult, decodeEnvelope } from '../domain/SaveCodec';
+import type { KeyValueStore } from './Platform';
+import { platform } from './Platform';
 
 export class LoadOutcome {
   result = new DecodeResult();
@@ -15,19 +17,19 @@ interface WriterRecord {
   updatedAt: number;
 }
 
+/**
+ * 存档仓库：主档 + 备份 + 损坏副本 + 入冬前快照。
+ * 底层存储由平台层提供（浏览器本地存储 / 小游戏 setStorageSync），规则与原版一致。
+ */
 export class BrowserSaveRepository {
   readonly available: boolean;
   private readonly ownerId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   private writerClaimed = false;
+  private readonly store: KeyValueStore;
 
-  constructor() {
-    try {
-      localStorage.setItem(this.key('probe'), '1');
-      localStorage.removeItem(this.key('probe'));
-      this.available = true;
-    } catch {
-      this.available = false;
-    }
+  constructor(store?: KeyValueStore) {
+    this.store = store ?? platform().storage;
+    this.available = this.store.probe();
   }
 
   private key(name: string): string { return PREFIX + name; }
@@ -36,14 +38,14 @@ export class BrowserSaveRepository {
     if (!this.available) return false;
     try {
       const now = Date.now();
-      const raw = localStorage.getItem(this.key('writer'));
+      const raw = this.store.get(this.key('writer'));
       if (raw !== null) {
         const current = JSON.parse(raw) as WriterRecord;
         if (current.id !== this.ownerId && now - current.updatedAt < WRITER_TTL_MS) return false;
       }
       const next: WriterRecord = { id: this.ownerId, updatedAt: now };
-      localStorage.setItem(this.key('writer'), JSON.stringify(next));
-      const verified = JSON.parse(localStorage.getItem(this.key('writer')) ?? '{}') as Partial<WriterRecord>;
+      this.store.set(this.key('writer'), JSON.stringify(next));
+      const verified = JSON.parse(this.store.get(this.key('writer')) ?? '{}') as Partial<WriterRecord>;
       this.writerClaimed = verified.id === this.ownerId;
       return this.writerClaimed;
     } catch {
@@ -54,7 +56,7 @@ export class BrowserSaveRepository {
   ownsWriter(): boolean {
     if (!this.available) return false;
     try {
-      const current = JSON.parse(localStorage.getItem(this.key('writer')) ?? '{}') as Partial<WriterRecord>;
+      const current = JSON.parse(this.store.get(this.key('writer')) ?? '{}') as Partial<WriterRecord>;
       return current.id === this.ownerId;
     } catch {
       return false;
@@ -64,7 +66,7 @@ export class BrowserSaveRepository {
   private touchWriter(): boolean {
     if (!this.available) return false;
     try {
-      const raw = localStorage.getItem(this.key('writer'));
+      const raw = this.store.get(this.key('writer'));
       if (raw === null) {
         this.writerClaimed = false;
         return this.claimWriter();
@@ -75,7 +77,7 @@ export class BrowserSaveRepository {
         return Date.now() - current.updatedAt >= WRITER_TTL_MS && this.claimWriter();
       }
       current.updatedAt = Date.now();
-      localStorage.setItem(this.key('writer'), JSON.stringify(current));
+      this.store.set(this.key('writer'), JSON.stringify(current));
       this.writerClaimed = true;
       return true;
     } catch {
@@ -86,8 +88,8 @@ export class BrowserSaveRepository {
   releaseWriter(): void {
     if (!this.available) return;
     try {
-      const current = JSON.parse(localStorage.getItem(this.key('writer')) ?? '{}') as Partial<WriterRecord>;
-      if (current.id === this.ownerId) localStorage.removeItem(this.key('writer'));
+      const current = JSON.parse(this.store.get(this.key('writer')) ?? '{}') as Partial<WriterRecord>;
+      if (current.id === this.ownerId) this.store.remove(this.key('writer'));
     } catch { /* best effort during page teardown */ }
     this.writerClaimed = false;
   }
@@ -101,8 +103,8 @@ export class BrowserSaveRepository {
     let main = '';
     let backup = '';
     try {
-      main = localStorage.getItem(this.key('save')) ?? '';
-      backup = localStorage.getItem(this.key('backup')) ?? '';
+      main = this.store.get(this.key('save')) ?? '';
+      backup = this.store.get(this.key('backup')) ?? '';
     } catch {
       outcome.result.error = 'STORAGE_UNAVAILABLE';
       return outcome;
@@ -115,7 +117,7 @@ export class BrowserSaveRepository {
         return outcome;
       }
       outcome.mainError = decoded.error;
-      try { localStorage.setItem(this.key(`corrupt.${Date.now()}`), main); } catch { /* best effort */ }
+      try { this.store.set(this.key(`corrupt.${Date.now()}`), main); } catch { /* best effort */ }
     }
     if (backup.length > 0) {
       const decoded = decodeEnvelope(backup);
@@ -135,14 +137,14 @@ export class BrowserSaveRepository {
     const verify = decodeEnvelope(text);
     if (!verify.ok) return false;
     try {
-      localStorage.setItem(this.key('temporary'), text);
-      const temporary = localStorage.getItem(this.key('temporary')) ?? '';
+      this.store.set(this.key('temporary'), text);
+      const temporary = this.store.get(this.key('temporary')) ?? '';
       if (!decodeEnvelope(temporary).ok) return false;
-      const current = localStorage.getItem(this.key('save'));
-      if (current !== null) localStorage.setItem(this.key('backup'), current);
-      localStorage.setItem(this.key('save'), temporary);
-      const saved = decodeEnvelope(localStorage.getItem(this.key('save')) ?? '').ok;
-      if (saved) localStorage.removeItem(this.key('temporary'));
+      const current = this.store.get(this.key('save'));
+      if (current !== null) this.store.set(this.key('backup'), current);
+      this.store.set(this.key('save'), temporary);
+      const saved = decodeEnvelope(this.store.get(this.key('save')) ?? '').ok;
+      if (saved) this.store.remove(this.key('temporary'));
       return saved;
     } catch (error) {
       console.error('保存失败', error);
@@ -153,12 +155,12 @@ export class BrowserSaveRepository {
   saveCheckpoint(text: string): boolean {
     if (!this.touchWriter()) return false;
     if (!decodeEnvelope(text).ok) return false;
-    try { localStorage.setItem(this.key('winter'), text); return true; } catch { return false; }
+    try { this.store.set(this.key('winter'), text); return true; } catch { return false; }
   }
 
   loadCheckpoint(): DecodeResult {
     try {
-      return decodeEnvelope(localStorage.getItem(this.key('winter')) ?? '');
+      return decodeEnvelope(this.store.get(this.key('winter')) ?? '');
     } catch {
       const result = new DecodeResult();
       result.error = 'STORAGE_UNAVAILABLE';
@@ -169,12 +171,8 @@ export class BrowserSaveRepository {
   wipe(): void {
     if (!this.touchWriter()) return;
     try {
-      const targets: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key !== null && key.startsWith(PREFIX)) targets.push(key);
-      }
-      targets.forEach((key) => localStorage.removeItem(key));
+      const targets = this.store.keys().filter((key) => key.startsWith(PREFIX));
+      targets.forEach((key) => this.store.remove(key));
       this.writerClaimed = false;
       this.claimWriter();
     } catch {

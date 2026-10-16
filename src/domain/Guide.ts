@@ -202,7 +202,7 @@ export class Guide {
     this.eng = eng;
   }
 
-  /** 强制教学仅保留采蜜、产卵、建造侦察蜂巢房三步。 */
+  /** 新手阶段：采蜜 → 产卵 → 侦察蜂巢房 → 侦察蜂 → 采集蜂巢房 → 采集蜂 → 储蜜格（见 GameConfig.TUTORIAL）。 */
   inTutorial(): boolean {
     return !this.eng.state.meta.tutorialDone;
   }
@@ -300,11 +300,21 @@ export class Guide {
       if (w.count(b.id) === 0 && e.hive.buildingAvailable(b.id)) {
         const cost = e.hive.buildCost(b.id);
         const short = e.reasonsForShortage(cost);
-        if (b.id === Bld.ScoutRoom && cost.length > 0) {
+        const keyBuilding = b.id === Bld.ScoutRoom || b.id === Bld.ForagerRoom || b.id === Bld.Storage;
+        if (keyBuilding && cost.length > 0) {
+          // 新手主线巢房：显示蜂蜜进度与当前酿蜜速度，让玩家知道“还要多久”
           const need = Math.ceil(cost[0].amount.toNumber());
           const have = Math.min(need, Math.floor(w.econ.num(Res.Honey)));
-          add(new Hint(`new_${b.id}`, short.length === 0 ? `蜂蜜 ${have}/${need}：点这里放置侦察蜂巢房` :
-            `建侦察蜂巢房：蜂蜜 ${have}/${need} · 点击花丛补花蜜，蜂巢会自动酿造`, 'new',
+          const rate = e.prod.baseConvertCapacity() * w.cfg.economy.baseConvertRatio;
+          const nectarFull = w.econ.fillRatio(Res.Nectar) >= 0.95;
+          const wait = rate > 0 ? Math.ceil((need - have) / rate) : 0;
+          // 关键信息放在最前面：手机上提示行会被截断
+          let text = `蜂蜜够了：点这里放置${b.name}`;
+          if (short.length > 0) {
+            text = nectarFull ? `花蜜满了，不用再点 · 约 ${wait} 秒后可建${b.name}` :
+              `点花丛采蜜 · ${b.name} 蜂蜜 ${have}/${need}（每秒酿 ${rate.toFixed(1)}）`;
+          }
+          add(new Hint(`new_${b.id}`, text, 'new',
             short.length === 0 ? `build:${b.id}` : 'focus:field@field',
             BLD_ICON[b.id] === undefined ? 'xf_action_build' : BLD_ICON[b.id]));
         } else {

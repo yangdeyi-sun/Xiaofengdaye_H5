@@ -1,0 +1,221 @@
+import type {
+  AdBackend, AudioBackend, DrawableImage, ImageLoader, KeyValueStore, Platform, RewardedResult, SoundHandle
+} from '../Platform';
+import type { AdUnitConfig } from './adUnits';
+import type {
+  MiniGameApi, MiniInnerAudioContext, MiniInterstitialAd, MiniRewardedCloseResult, MiniRewardedVideoAd
+} from './MiniGameApi';
+
+class MiniStorage implements KeyValueStore {
+  constructor(private readonly api: MiniGameApi) {}
+  probe(): boolean {
+    try {
+      this.api.setStorageSync('xiaofengdaye.probe', '1');
+      this.api.removeStorageSync('xiaofengdaye.probe');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  get(key: string): string | null {
+    const value = this.api.getStorageSync(key);
+    // 小游戏读取不存在的键返回空字符串
+    return typeof value === 'string' && value.length > 0 ? value : null;
+  }
+  set(key: string, value: string): void { this.api.setStorageSync(key, value); }
+  remove(key: string): void { this.api.removeStorageSync(key); }
+  keys(): string[] {
+    try { return this.api.getStorageInfoSync().keys.slice(); } catch { return []; }
+  }
+}
+
+class MiniSound implements SoundHandle {
+  private readonly ctx: MiniInnerAudioContext;
+  private finished = false;
+  private disposed = false;
+
+  constructor(api: MiniGameApi, src: string, loop: boolean) {
+    this.ctx = api.createInnerAudioContext();
+    this.ctx.src = src;
+    this.ctx.loop = loop;
+    this.ctx.autoplay = false;
+  }
+
+  get volume(): number { return this.ctx.volume; }
+  set volume(value: number) { if (!this.disposed) this.ctx.volume = Math.max(0, Math.min(1, value)); }
+  get paused(): boolean { return this.disposed || this.ctx.paused; }
+  play(): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error('disposed'));
+    try { this.ctx.play(); return Promise.resolve(); } catch (error) { return Promise.reject(error); }
+  }
+  pause(): void { if (!this.disposed) this.ctx.pause(); }
+  stop(): void { if (!this.disposed) this.ctx.stop(); }
+  onFinish(callback: () => void): void {
+    const once = (): void => {
+      if (this.finished) return;
+      this.finished = true;
+      callback();
+    };
+    this.ctx.onEnded(once);
+    this.ctx.onError(once);
+  }
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    try { this.ctx.stop(); this.ctx.destroy(); } catch { /* already released */ }
+  }
+}
+
+class MiniAudio implements AudioBackend {
+  constructor(private readonly api: MiniGameApi, private readonly base: string) {}
+  create(path: string, loop: boolean): SoundHandle { return new MiniSound(this.api, this.base + path, loop); }
+}
+
+class MiniImages implements ImageLoader {
+  constructor(private readonly api: MiniGameApi, private readonly base: string) {}
+  load(path: string): Promise<DrawableImage> {
+    return new Promise<DrawableImage>((resolve, reject) => {
+      const image = this.api.createImage();
+      image.onload = () => resolve(image as unknown as DrawableImage);
+      image.onerror = (err) => reject(err instanceof Error ? err : new Error(`image ${path}`));
+      image.src = this.base + path;
+    });
+  }
+}
+
+/**
+ * 小游戏广告。按平台规范：
+ * - 只在 onClose 回调中 isEnded === true 时发奖励；
+ * - show() 失败先 load() 再试一次，仍失败视为“暂无广告”；
+ * - 每个广告位只创建一次实例，回调统一分发，避免重复注册导致重复发奖。
+ */
+class MiniAds implements AdBackend {
+  private readonly rewarded = new Map<string, MiniRewardedVideoAd>();
+  private pending: ((result: RewardedResult) => void) | null = null;
+  private interstitial: MiniInterstitialAd | null = null;
+
+  constructor(private readonly api: MiniGameApi, private readonly units: AdUnitConfig) {}
+
+  private unitFor(placement: string): string {
+    const specific = this.units.rewarded[placement];
+    return specific !== undefined && specific.length > 0 ? specific : this.units.rewardedDefault;
+  }
+
+  private instance(unitId: string): MiniRewardedVideoAd {
+    const existing = this.rewarded.get(unitId);
+    if (existing !== undefined) return existing;
+    const ad = this.api.createRewardedVideoAd({ adUnitId: unitId });
+    ad.onClose((res: MiniRewardedCloseResult | undefined) => {
+      // 老版本基础库在用户看完后 res 可能为 undefined，按看完处理
+      const ended = res === undefined || res.isEnded === true;
+      this.settle({ status: ended ? 'completed' : 'skipped', detail: `count=${res?.count ?? ''}` });
+    });
+    ad.onError((err: unknown) => {
+      this.settle({ status: 'unavailable', detail: JSON.stringify(err) });
+    });
+    this.rewarded.set(unitId, ad);
+    return ad;
+  }
+
+  private settle(result: RewardedResult): void {
+    const resolve = this.pending;
+    this.pending = null;
+    resolve?.(result);
+  }
+
+  showRewarded(placement: string): Promise<RewardedResult> {
+    const unitId = this.unitFor(placement);
+    // 还没在 adUnits.ts 填广告位 ID：按“占位”处理，直接视为看完（上线前务必填好）
+    if (unitId.length === 0) return Promise.resolve({ status: 'completed', detail: `placeholder:${placement}` });
+    if (this.pending !== null) return Promise.resolve({ status: 'unavailable', detail: 'busy' });
+    let ad: MiniRewardedVideoAd;
+    try {
+      ad = this.instance(unitId);
+    } catch (error) {
+      return Promise.resolve({ status: 'unavailable', detail: String(error) });
+    }
+    return new Promise<RewardedResult>((resolve) => {
+      this.pending = resolve;
+      ad.show()
+        .catch(() => ad.load().then(() => ad.show()))
+        .catch((err: unknown) => this.settle({ status: 'unavailable', detail: JSON.stringify(err) }));
+    });
+  }
+
+  showInterstitial(_placement: string): Promise<boolean> {
+    const create = this.api.createInterstitialAd;
+    if (this.units.interstitial.length === 0 || create === undefined) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      try {
+        if (this.interstitial === null) {
+          this.interstitial = create.call(this.api, { adUnitId: this.units.interstitial });
+        }
+        const ad = this.interstitial;
+        ad.load()
+          .then(() => ad.show())
+          .then(() => resolve(true))
+          .catch(() => {
+            // 抖音插屏实例出错后需要销毁重建
+            try { ad.destroy(); } catch { /* ignore */ }
+            this.interstitial = null;
+            resolve(false);
+          });
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+}
+
+export interface MiniGamePlatformOptions {
+  /** 'douyin' | 'taptap' | 'wechat' */
+  name: string;
+  api: MiniGameApi;
+  adUnits: AdUnitConfig;
+  /** 资源根路径：留空表示包内资源；填 CDN 地址（以 / 结尾）则从远程加载 */
+  assetBase?: string;
+}
+
+export class MiniGamePlatform implements Platform {
+  readonly name: string;
+  readonly storage: KeyValueStore;
+  readonly audio: AudioBackend;
+  readonly images: ImageLoader;
+  readonly ads: AdBackend;
+  private readonly api: MiniGameApi;
+
+  constructor(options: MiniGamePlatformOptions) {
+    const base = options.assetBase ?? '';
+    this.name = options.name;
+    this.api = options.api;
+    this.storage = new MiniStorage(options.api);
+    this.audio = new MiniAudio(options.api, base);
+    this.images = new MiniImages(options.api, base);
+    this.ads = new MiniAds(options.api, options.adUnits);
+  }
+
+  vibrate(ms: number): void {
+    try {
+      if (ms >= 300) this.api.vibrateLong();
+      else this.api.vibrateShort();
+    } catch { /* 部分机型不支持振动 */ }
+  }
+
+  perfNow(): number {
+    const perf = this.api.getPerformance?.();
+    return perf !== undefined ? perf.now() : Date.now();
+  }
+
+  requestFrame(callback: (now: number) => void): number {
+    if (typeof requestAnimationFrame === 'function') return requestAnimationFrame(callback);
+    return setTimeout(() => callback(this.perfNow()), 16) as unknown as number;
+  }
+
+  cancelFrame(handle: number): void {
+    if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(handle);
+    else clearTimeout(handle);
+  }
+
+  onHide(callback: () => void): void { this.api.onHide(callback); }
+  onShow(callback: () => void): void { this.api.onShow(() => callback()); }
+}

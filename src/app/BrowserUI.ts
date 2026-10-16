@@ -16,6 +16,12 @@ import {
   AGREEMENT_FULL, ECO_NOTES, HELP_TEXT, PRIVACY_FULL, PRIVACY_SUMMARY
 } from './content';
 import { GameSession, PRIVACY_VERSION, seasonName } from './GameSession';
+import {
+  grantBearAid, grantOfflineDouble, grantSwarmBonus, grantWinterSupply, offlineHasGains, swarmBonusPoints,
+  winterSupplyAmount, winterSupplyWanted
+} from './ads/AdRewards';
+import { AD_REWARDS, AdPlacement } from './ads/placements';
+import type { WatchResult } from './ads/AdService';
 
 type Screen = 'boot' | 'privacy' | 'home' | 'game' | 'error';
 type View = 'field' | 'hive';
@@ -118,6 +124,10 @@ function button(action: string, label: string, options: {
   return `<button type="button" class="${classes}" data-action="${h(action)}"${options.id === undefined ? '' : ` data-id="${h(options.id)}"`}${options.value === undefined ? '' : ` data-value="${h(options.value)}"`}${options.disabled ? ' disabled' : ''}${options.title === undefined ? '' : ` title="${h(options.title)}"`}>${label}</button>`;
 }
 function panelCard(body: string, danger = false): string { return `<section class="panel-card${danger ? ' danger-card' : ''}">${body}</section>`; }
+function clock(seconds: number): string {
+  const s = Math.max(0, Math.ceil(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
 
 /** Browser-only DOM and Pointer Events adapter. All game mutations are delegated to GameEngine/GameSession. */
 export class BrowserUI {
@@ -140,6 +150,9 @@ export class BrowserUI {
   private introReplay = false;
   private introGapUntil = 0;
   private offlineReport: OfflineReport | null = null;
+  private boostModal = false;
+  /** 分蜂成功后可通过广告额外领取的传承点；0 表示不弹出 */
+  private swarmBonus = 0;
   private bearModal = false;
   private bearPromptKey = '';
   private pendingBearUntil = 0;
@@ -158,6 +171,7 @@ export class BrowserUI {
   private deepTarget = '';
   private lastPanelRender = 0;
   private rangeActive = false;
+  private lastScrollAt = 0;
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private canvasWidth = 0;
@@ -184,6 +198,7 @@ export class BrowserUI {
   mount(): void {
     this.root.addEventListener('click', (event) => this.onClick(event));
     this.root.addEventListener('input', (event) => this.onRange(event, false));
+    this.root.addEventListener('scroll', () => { this.lastScrollAt = Date.now(); }, { capture: true, passive: true });
     this.root.addEventListener('change', (event) => this.onRange(event, true));
     this.root.addEventListener('pointerdown', (event) => {
       const target = event.target;
@@ -597,7 +612,8 @@ export class BrowserUI {
       if (banners.length > 0 && this.banner.length === 0) this.showBanner(banners[0], 'milestone');
     }
     if (this.introId.length === 0 && this.offlineReport === null && this.placing.length === 0 &&
-      this.panel.length === 0 && now >= this.introGapUntil) {
+      this.panel.length === 0 && !this.boostModal && this.swarmBonus === 0 && !this.session.ads.busy &&
+      now >= this.introGapUntil) {
       const topic = this.session.guide().pendingIntro();
       if (topic !== null) {
         this.introId = topic.id;
@@ -612,6 +628,19 @@ export class BrowserUI {
     this.bannerUntil = Date.now() + (kind === 'threat' || kind === 'warn' ? 4500 : 3000);
   }
 
+  /** 横幅图标：按消息类型选择已有的图标文件（季节横幅显示当前季节） */
+  private bannerIcon(): string {
+    switch (this.bannerKind) {
+      case 'threat': case 'warn': case 'error': return 'xf_status_danger';
+      case 'season': return seasonIcon(this.engine().run.season.season);
+      case 'rare': return 'xf_status_rare';
+      case 'swarm': return 'xf_nav_split';
+      case 'key': return 'xf_action_upgrade';
+      case 'achievement': case 'milestone': return 'xf_status_complete';
+      default: return 'xf_card_alarm';
+    }
+  }
+
   private showEvent(title: string, text: string, eventIcon: string, duration: number): void {
     this.eventTitle = title; this.eventText = text; this.eventIcon = eventIcon;
     this.eventUntil = Date.now() + duration;
@@ -620,6 +649,31 @@ export class BrowserUI {
   private showToast(text: string, error = false): void {
     this.toastText = text; this.toastUntil = Date.now() + 2600;
     if (error) this.session.audio.play('ui_error');
+  }
+
+  /** 激励视频按钮：统一显示“广告”角标和今日剩余次数，不满足条件时置灰并说明原因 */
+  private adButton(action: string, label: string, placement: string, options: {
+    id?: string; value?: string | number; primary?: boolean; need?: number;
+  } = {}): string {
+    const check = this.session.ads.check(placement, options.need ?? 1);
+    const note = check.ok ? `今日剩余 ${check.remaining}` : check.reason;
+    return `<button type="button" class="btn ad-btn ${options.primary === false ? 'ghost' : 'primary'}" data-action="${h(action)}"${options.id === undefined ? '' : ` data-id="${h(options.id)}"`}${options.value === undefined ? '' : ` data-value="${h(options.value)}"`}${check.ok ? '' : ' disabled'}><span class="ad-tag">广告</span><span class="ad-label">${label}<small>${h(note)}</small></span></button>`;
+  }
+
+  /** 播放激励视频，看完后执行 reward；未看完或无广告时只提示，不扣任何东西 */
+  private runAd(placement: string, count: number, reward: (index: number) => void, done?: (result: WatchResult) => void): void {
+    if (this.session.ads.busy) return;
+    void this.session.ads.watch(placement, count, reward).then((result) => {
+      if (result.completed === 0) this.showToast(result.message, result.status !== 'skipped');
+      done?.(result);
+      if (result.completed > 0) {
+        this.session.audio.play('ui_claim_reward');
+        this.session.saveNow();
+        // 广告 SDK 未接入时是占位跳过，提示一下，避免误以为广告已经上线
+        if (result.placeholder) this.showToast(`${this.toastText.length > 0 ? `${this.toastText} · ` : ''}（广告位占位，已直接发放）`);
+      }
+      this.refreshGame(true);
+    });
   }
 
   private feedback(result: CmdResult): void {
@@ -660,7 +714,9 @@ export class BrowserUI {
     if (drawerView !== null) drawerView.innerHTML = `${icon(this.view === 'field' ? 'xf_nav_hive' : 'xf_flower_wild')} ${this.view === 'field' ? '进入蜂巢' : '返回花田'}`;
     this.setHtml('#drawer-nav', this.renderDrawerNav());
     const now = Date.now();
-    if ((forcePanel || now - this.lastPanelRender >= 1000) && !this.rangeActive) {
+    // 玩家正在滚动面板时暂停定时重绘，滚动结束后再刷新数据
+    const scrolling = now - this.lastScrollAt < 900;
+    if ((forcePanel || (now - this.lastPanelRender >= 1000 && !scrolling)) && !this.rangeActive) {
       this.setHtml('#panel-host', this.panel.length > 0 ? this.renderPanel() : '');
       this.lastPanelRender = now;
     }
@@ -676,7 +732,31 @@ export class BrowserUI {
 
   private setHtml(selector: string, value: string): void {
     const element = this.root.querySelector<HTMLElement>(selector);
-    if (element !== null && element.innerHTML !== value) element.innerHTML = value;
+    if (element === null || element.innerHTML === value) return;
+    // 重绘会替换内部的滚动容器：先记下各滚动区域的位置，替换后按“类名 + 序号”还原，避免列表跳回顶部
+    const saved: [string, number, number][] = [];
+    element.querySelectorAll<HTMLElement>('*').forEach((node) => {
+      if (node.scrollTop > 0 || node.scrollLeft > 0) saved.push([this.scrollKey(element, node), node.scrollTop, node.scrollLeft]);
+    });
+    element.innerHTML = value;
+    if (saved.length === 0) return;
+    const fresh = new Map<string, HTMLElement>();
+    element.querySelectorAll<HTMLElement>('*').forEach((node) => {
+      const key = this.scrollKey(element, node);
+      if (!fresh.has(key)) fresh.set(key, node);
+    });
+    saved.forEach(([key, top, left]) => {
+      const node = fresh.get(key);
+      if (node !== undefined) { node.scrollTop = top; node.scrollLeft = left; }
+    });
+  }
+
+  /** 滚动区域的稳定标识：同一面板重绘前后保持一致 */
+  private scrollKey(host: HTMLElement, node: HTMLElement): string {
+    const cls = (node.getAttribute('class') ?? '').trim();
+    const selector = cls.length > 0 && /^[\w\s-]+$/.test(cls) ? `.${cls.split(/\s+/).join('.')}` : node.tagName;
+    const same = host.querySelectorAll(selector);
+    return `${this.panel}|${selector}|${Array.prototype.indexOf.call(same, node)}`;
   }
 
   private resourceList(): string[] {
@@ -714,7 +794,11 @@ export class BrowserUI {
       const rate = this.resourceRate(res);
       return `<div class="resource-chip${full ? ' full' : ''}">${icon(resIcon(res), resName(res))}<span><b>${formatBig(e.w.econ.amount(res))}</b>${rate.length > 0 ? `<small>${h(rate)}</small>` : ''}</span></div>`;
     }).join('');
-    return `<button class="season-chip" data-action="open-panel" data-id="eco">${icon(seasonIcon(season.season), seasonName(season.season))}<span><b>${h(seasonName(season.season))}</b>${season.formal ? `<small>${formatDuration(e.season.remaining())}</small>` : ''}</span></button>${alert}<button class="resource-scroll" data-action="open-resources">${resources}</button>`;
+    const boost = this.session.ads.boostSpeed();
+    const boostChip = boost > 1
+      ? `<button class="boost-chip active" data-action="open-boost">⚡${boost}× <small>${clock(this.session.ads.boostRemainingSec())}</small></button>`
+      : `<button class="boost-chip" data-action="open-boost">⚡加速</button>`;
+    return `${boostChip}<button class="season-chip" data-action="open-panel" data-id="eco">${icon(seasonIcon(season.season), seasonName(season.season))}<span><b>${h(seasonName(season.season))}</b>${season.formal ? `<small>${formatDuration(e.season.remaining())}</small>` : ''}</span></button>${alert}<button class="resource-scroll" data-action="open-resources">${resources}</button>`;
   }
 
   private visibleHints(): Hint[] {
@@ -1030,7 +1114,8 @@ export class BrowserUI {
       effects.push(`已度过冬季 ${season.wintersSurvived} 次${season.firstWinterProtected ? ' · 首个冬季受保护：只降低产量' : ''}`);
     }
     if (season.starving) effects.push('当前储蜜不足：采集与加工效率减半');
-    const collapsed = e.run.colony.collapsed ? panelCard(`<h3 class="danger-text">蜂群衰败</h3><p>存档仍然保留。可以消耗1点传承在当前种区重启，或读取最近一次入冬前快照。</p><div class="choice-row">${button('recover-colony', '消耗1点传承重启', { primary: true })}${button('restore-winter', '读取入冬前快照')}</div>`, true) : '';
+    const collapsed = e.run.colony.collapsed ? panelCard(`<h3 class="danger-text">蜂群衰败</h3><p>存档仍然保留。可以消耗1点传承在当前种区重启，或读取最近一次入冬前快照。</p><div class="choice-stack">${this.adButton('ad-revive', '免费重振蜂群（不消耗传承）', AdPlacement.ColonyRevive)}${button('recover-colony', '消耗1点传承重启', { primary: false })}${button('restore-winter', '读取入冬前快照')}</div>`, true) : '';
+    const supply = winterSupplyWanted(e) ? panelCard(`<h3>${icon('xf_season_winter_prep')} 储备告急</h3><p>邻近蜂巢愿意支援一批蜂蜜（约 ${Math.round(winterSupplyAmount(e))}），帮你熬过这个冬天。</p>${this.adButton('ad-winter-supply', '领取紧急补给', AdPlacement.WinterSupply)}`) : '';
     const guardsByArea = e.threats.guardsByArea;
     const guardParts = Object.keys(guardsByArea).map((key) => `${key === 'gate' ? '巢门' : (key === 'fields' ? '花田' : '航线')} ${Math.round(guardsByArea[key])}`);
     const guardInjured = e.w.injured(Role.Guard);
@@ -1044,7 +1129,7 @@ export class BrowserUI {
       if (event.phase === 'warning') phase = `${Math.max(0, Math.ceil(event.endsAt - e.run.time))} 秒后到达`;
       else if (event.phase === 'postponed') phase = `暂时离开，${formatDuration(event.endsAt - e.run.time)}后返回`;
       const bearActions = event.type === 'bear' && event.phase !== 'active'
-        ? `<div class="choice-row">${button('bear-choice', '集结防守', { id: event.eventId, value: 'defend', primary: true })}${button('bear-choice', '交付蜂蜜', { id: event.eventId, value: 'tribute' })}${button('bear-choice', '稍后处理', { id: event.eventId, value: 'later' })}</div>` : '';
+        ? `<div class="choice-row">${button('bear-choice', '集结防守', { id: event.eventId, value: 'defend', primary: true })}${button('bear-choice', '交付蜂蜜', { id: event.eventId, value: 'tribute' })}${button('bear-choice', '稍后处理', { id: event.eventId, value: 'later' })}</div>${this.adButton('ad-bear-aid', '请邻巢援军', AdPlacement.BearAid, { id: event.eventId, primary: false })}` : '';
       return panelCard(`<div class="card-head">${icon(threatIcon(event.type))}<div><h3>${h(def.name)} @ ${h(where)}</h3><p>${h(phase)} · 剩余 ${Math.max(0, Math.ceil(event.hp))}/${Math.ceil(event.maxHp)}</p><small>${h(def.desc)}</small></div></div>${bearActions}`, true);
     }).join('');
     const injured = e.w.injured(Role.Forager) + e.w.injured(Role.House);
@@ -1053,7 +1138,7 @@ export class BrowserUI {
       threatSection = `<h3 class="section-title">${icon('xf_status_danger')} 敌害</h3><p>${h(guardLine)}</p>${threats.length > 1 ? `<p class="warning">同时存在 ${threats.length} 个敌害，守卫会分区，单个目标获得的攻击力下降。</p>` : ''}${injured > 0 ? `<p class="muted">${icon('xf_status_injured')} 受伤休养中的工蜂 ${injured} 只，会逐渐恢复。</p>` : ''}${threats.length === 0 ? `${artImage('state_no_threats', '没有威胁', 'empty-art')}<p class="ok">目前没有威胁</p>` : threatCards}<p class="muted">敌害在第一只守卫蜂孵化后开放；离线期间不会发生熊袭击与毁巢。</p>`;
     }
     const starving = season.starving ? `<p class="warning">${icon('xf_status_stopped')} ${season.starveSeconds >= 150 ? '严重饥饿：蜂群正在缓慢减员' : (season.starveSeconds >= 60 ? '持续饥饿：产卵与孵化受限' : '部分蜜蜂因缺蜜暂停工作')}</p>` : '';
-    return this.panelFrame('四季与防御', 'xf_nav_ecology', `<div class="heading-line">${icon(seasonIcon(season.season))}<h3>${h(seasonLine)}</h3></div>${effects.map((line) => `<p>${h(line)}</p>`).join('')}${starving}${collapsed}<hr>${threatSection}`);
+    return this.panelFrame('四季与防御', 'xf_nav_ecology', `<div class="heading-line">${icon(seasonIcon(season.season))}<h3>${h(seasonLine)}</h3></div>${effects.map((line) => `<p>${h(line)}</p>`).join('')}${starving}${supply}${collapsed}<hr>${threatSection}`);
   }
 
   private renderEvolutionPanel(): string {
@@ -1223,16 +1308,16 @@ export class BrowserUI {
       `<div class="setting-row">${icon(rowIcon)}<span><b>${h(label)}</b>${desc.length > 0 ? `<small>${h(desc)}</small>` : ''}</span>${this.toggleButton(key, on)}</div>`;
     const skins = e.w.cfg.skins.filter((skin: SkinDef) => e.state.meta.skins.includes(skin.id)).map((skin) =>
       `<button type="button" class="skin-choice${settings.skin === skin.id ? ' selected' : ''}" data-action="set-skin" data-id="${h(skin.id)}">${artImage(`skin_background_${skin.id}`, skin.name)}<span>${h(skin.name)}</span></button>`).join('');
-    return this.panelFrame('设置', 'xf_nav_settings', `<h3 class="section-title">音画</h3>${toggleRow('music', '背景音乐', '', settings.music, 'xf_action_music')}${toggleRow('sfx', '音效', '', settings.sfx, 'xf_action_sound')}${this.range('volume', 'musicVolume', settings.musicVolume, 0, 100, 5, `音乐音量 ${settings.musicVolume}%`)}${this.range('volume', 'ambientVolume', settings.ambientVolume, 0, 100, 5, `环境声音量 ${settings.ambientVolume}%`)}${this.range('volume', 'effectsVolume', settings.effectsVolume, 0, 100, 5, `操作/告警音量 ${settings.effectsVolume}%`)}${toggleRow('vibration', '振动', '浏览器和设备支持时使用', settings.vibration, 'xf_action_vibration')}${toggleRow('particles', '粒子特效', '关闭可降低功耗', settings.particles, 'xf_status_rare')}${toggleRow('reduceMotion', '减少动态效果', '降低动画速度与天气粒子', settings.reduceMotion, 'xf_action_pause')}${toggleRow('eventAnimations', '事件动画', '敌害与季节更替的非阻塞通告', settings.eventAnimations, 'xf_card_alarm')}${toggleRow('lowPower', '省电模式', '画面降为 30 帧、使用半尺寸美术', this.session.lowPower, 'xf_action_low_power')}<hr><h3 class="section-title">玩法</h3><div class="setting-row"><span><b>游戏速度</b></span><div class="choice-row">${[1, 2, 4].map((speed) => button('set-speed', `${speed}×`, { value: speed, primary: settings.gameSpeed === speed })).join('')}</div></div>${toggleRow('ecoMode', '生态模式（工蜂寿命）', '开启后工蜂会自然老化，由自动产卵补员', settings.ecoMode, 'xf_nav_ecology')}<h3 class="section-title">蜂巢外观</h3><div class="skin-grid">${skins}</div><hr><h3 class="section-title">多设备</h3>${panelCard(`<div class="setting-row unsupported">${icon('xf_action_refresh')}<span><b>跨设备接续</b><small>标准网页不支持 HarmonyOS 应用接续。当前存档只保存在此浏览器。</small></span><em>不支持</em></div>`)}<hr><h3 class="section-title">${icon('xf_action_help')} 帮助与说明</h3><div class="choice-row">${button('open-legal', '玩法帮助', { id: 'help' })}${button('open-legal', '隐私政策', { id: 'privacy' })}${button('open-legal', '用户协议', { id: 'agreement' })}</div><hr><h3 class="section-title">数据与隐私</h3><p class="muted">进度只保存在当前浏览器。清除进度会重新开始；删除全部数据会同时清除设置与隐私同意记录。</p><div class="choice-row">${button('confirm-reset-progress', '清除游戏进度', { danger: true })}${button('confirm-delete-all', `${icon('xf_action_delete')} 删除全部数据`, { danger: true })}</div><div class="about-row">${artImage('logo_mark', '小峰大业')}${artImage('app_icon', '应用图标')}<span><b>小峰大业</b><small>版本 0.1.0 · 单机版</small></span>${button('save-now', `${icon('xf_status_save')} 立即保存`)}</div>`);
+    return this.panelFrame('设置', 'xf_nav_settings', `<h3 class="section-title">音画</h3>${toggleRow('music', '背景音乐', '', settings.music, 'xf_action_music')}${toggleRow('sfx', '音效', '', settings.sfx, 'xf_action_sound')}${this.range('volume', 'musicVolume', settings.musicVolume, 0, 100, 5, `音乐音量 ${settings.musicVolume}%`)}${this.range('volume', 'effectsVolume', settings.effectsVolume, 0, 100, 5, `音效音量 ${settings.effectsVolume}%`)}${toggleRow('vibration', '振动', '浏览器和设备支持时使用', settings.vibration, 'xf_action_vibration')}${toggleRow('particles', '粒子特效', '关闭可降低功耗', settings.particles, 'xf_status_rare')}${toggleRow('reduceMotion', '减少动态效果', '降低动画速度与天气粒子', settings.reduceMotion, 'xf_action_pause')}${toggleRow('eventAnimations', '事件动画', '敌害与季节更替的非阻塞通告', settings.eventAnimations, 'xf_card_alarm')}${toggleRow('lowPower', '省电模式', '画面降为 30 帧、使用半尺寸美术', this.session.lowPower, 'xf_action_low_power')}<hr><h3 class="section-title">玩法</h3><div class="setting-row"><span><b>花潮加速</b><small>${this.session.ads.boostSpeed() > 1 ? `${this.session.ads.boostSpeed()}× 进行中，剩余 ${clock(this.session.ads.boostRemainingSec())}` : `看 1 个广告 2×，看 2 个广告 4×，持续 ${AD_REWARDS.boostMinutes} 分钟`}</small></span>${button('open-boost', '⚡ 加速')}</div>${toggleRow('ecoMode', '生态模式（工蜂寿命）', '开启后工蜂会自然老化，由自动产卵补员', settings.ecoMode, 'xf_nav_ecology')}<h3 class="section-title">蜂巢外观</h3><div class="skin-grid">${skins}</div><hr><h3 class="section-title">${icon('xf_action_help')} 帮助与说明</h3><div class="choice-row">${button('open-legal', '玩法帮助', { id: 'help' })}${button('open-legal', '隐私政策', { id: 'privacy' })}${button('open-legal', '用户协议', { id: 'agreement' })}</div><hr><h3 class="section-title">数据与隐私</h3><p class="muted">进度保存在本设备。清除进度会重新开始；删除全部数据会同时清除设置与隐私同意记录。</p><div class="choice-row">${button('confirm-reset-progress', '清除游戏进度', { danger: true })}${button('confirm-delete-all', `${icon('xf_action_delete')} 删除全部数据`, { danger: true })}</div><div class="about-row">${artImage('logo_mark', '小峰大业')}${artImage('app_icon', '应用图标')}<span><b>小峰大业</b><small>版本 0.3.0</small></span>${button('save-now', `${icon('xf_status_save')} 立即保存`)}</div>`);
   }
 
   private renderLegalOverlay(): string {
     if (this.legal.length === 0) return '';
     let title = '隐私政策';
     let lines = PRIVACY_FULL;
-    let legalIcon = 'xf_action_privacy';
+    let legalIcon = 'xf_status_save';
     if (this.legal === 'agreement') {
-      title = '用户协议'; lines = AGREEMENT_FULL; legalIcon = 'xf_action_terms';
+      title = '用户协议'; lines = AGREEMENT_FULL; legalIcon = 'xf_card_updated';
     } else if (this.legal === 'help') {
       title = '玩法帮助'; lines = HELP_TEXT; legalIcon = 'xf_action_help';
     }
@@ -1247,13 +1332,28 @@ export class BrowserUI {
     }).filter(Boolean).join('');
     const seasons = report.seasonsPassed.length > 0
       ? `<p class="muted">期间经过：${h(report.seasonsPassed.map((item) => seasonName(item)).join('、'))}</p>` : '';
-    return `<div class="modal-layer"><section class="modal-card offline-card">${artImage('illustration_offline_return', '离线归来', 'wide-art')}<h2>欢迎回来</h2><p>离开了 ${h(formatDuration(report.elapsed))}，结算了 ${h(formatDuration(report.credited))} 的蜂群运转。</p>${report.truncated > 0 ? `<p class="warning">超过离线收益上限的 ${h(formatDuration(report.truncated))} 未计入收益。</p>` : ''}${report.anomaly.length > 0 ? `<p class="warning">${h(report.anomaly)}</p>` : ''}<div class="gain-grid">${gains || '<p class="muted">本次没有资源变化</p>'}</div>${seasons}${report.notes.map((line) => `<p class="note-line">${icon('xf_status_info')}${h(line)}</p>`).join('')}${button('close-offline', '收下并继续', { primary: true })}</section></div>`;
+    return `<div class="modal-layer"><section class="modal-card offline-card">${artImage('illustration_offline', '离线归来', 'wide-art')}<h2>欢迎回来</h2><p>离开了 ${h(formatDuration(report.elapsed))}，结算了 ${h(formatDuration(report.credited))} 的蜂群运转。</p>${report.truncated > 0 ? `<p class="warning">超过离线收益上限的 ${h(formatDuration(report.truncated))} 未计入收益。</p>` : ''}${report.anomaly.length > 0 ? `<p class="warning">${h(report.anomaly)}</p>` : ''}<div class="gain-grid">${gains || '<p class="muted">本次没有资源变化</p>'}</div>${seasons}${report.notes.map((line) => `<p class="note-line">${icon('xf_card_alarm')}${h(line)}</p>`).join('')}<div class="choice-stack">${offlineHasGains(report) ? this.adButton('ad-offline-double', '收益翻倍', AdPlacement.OfflineDouble) : ''}${button('close-offline', '收下并继续', { primary: !offlineHasGains(report) })}</div></section></div>`;
   }
 
   private renderBearOverlay(event: ThreatEvent): string {
     const tribute = Math.round(this.engine().threats.bearTribute());
     const seconds = Math.max(0, Math.ceil(event.endsAt - this.engine().run.time));
-    return `<div class="modal-layer threat-layer"><section class="modal-card bear-card">${artImage('illustration_bear_warning', '熊来袭', 'wide-art')}<h2>${icon('xf_enemy_bear')} 熊来袭</h2><p>熊循着蜜香靠近蜂巢，约 ${seconds} 秒后开始抢蜜。蜂巢不会被摧毁。</p><div class="choice-stack">${button('bear-choice', '集结守卫蜂防守', { id: event.eventId, value: 'defend', primary: true })}${button('bear-choice', `交付 ${tribute} 蜂蜜让它离开`, { id: event.eventId, value: 'tribute' })}${button('bear-choice', event.postponed >= 2 ? '不能再稍后处理' : '稍后处理（10分钟后回来）', { id: event.eventId, value: 'later', disabled: event.postponed >= 2 })}</div></section></div>`;
+    return `<div class="modal-layer threat-layer"><section class="modal-card bear-card">${artImage('badge_bear', '熊来袭', 'bear-badge')}<h2>${icon('xf_enemy_bear')} 熊来袭</h2><p>熊循着蜜香靠近蜂巢，约 ${seconds} 秒后开始抢蜜。蜂巢不会被摧毁。</p><div class="choice-stack">${button('bear-choice', '集结守卫蜂防守', { id: event.eventId, value: 'defend', primary: true })}${button('bear-choice', `交付 ${tribute} 蜂蜜让它离开`, { id: event.eventId, value: 'tribute' })}${this.adButton('ad-bear-aid', '请邻巢援军赶走熊（不损失蜂蜜）', AdPlacement.BearAid, { id: event.eventId, primary: false })}${button('bear-choice', event.postponed >= 2 ? '不能再稍后处理' : '稍后处理（10分钟后回来）', { id: event.eventId, value: 'later', disabled: event.postponed >= 2 })}</div></section></div>`;
+  }
+
+  private renderBoostOverlay(): string {
+    const ads = this.session.ads;
+    const active = ads.boostSpeed();
+    const status = active > 1
+      ? `<p class="boost-status">⚡ 当前 ${active}× 加速，剩余 ${clock(ads.boostRemainingSec())}</p>`
+      : '<p class="muted">花期正盛，蜂群全力出动：游戏内时间按倍速流逝，采集、繁育和季节一起加快。</p>';
+    const tiers = AD_REWARDS.boostTiers.map((tier) =>
+      `<div class="boost-tier"><b>${tier.speed}×</b><span>${AD_REWARDS.boostMinutes} 分钟 · 看 ${tier.ads} 个广告</span>${this.adButton('ad-boost', tier.ads > 1 ? `连看 ${tier.ads} 个，开启 ${tier.speed}×` : `开启 ${tier.speed}×`, AdPlacement.FlowerBoost, { value: tier.speed, need: tier.ads, primary: tier.speed === 4 })}</div>`).join('');
+    return `<div class="modal-layer"><section class="modal-card boost-card"><h2>⚡ 花潮加速</h2>${status}<div class="boost-tiers">${tiers}</div><p class="muted small-note">连看两个广告时，看完第一个就先获得 2×，看完第二个升级为 4×。</p>${button('close-boost', '关闭')}</section></div>`;
+  }
+
+  private renderSwarmBonusOverlay(): string {
+    return `<div class="modal-layer"><section class="modal-card swarm-bonus-card">${artImage('illustration_split_arrive', '分蜂完成', 'wide-art')}<h2>分蜂完成</h2><p>蜂群已抵达新种区。看一个广告，额外获得 <b>${this.swarmBonus}</b> 点传承。</p><div class="choice-stack">${this.adButton('ad-swarm-bonus', `传承点 +${this.swarmBonus}`, AdPlacement.SwarmBonus)}${button('close-swarm-bonus', '不用了')}</div></section></div>`;
   }
 
   private renderIntroOverlay(topic: IntroTopic): string {
@@ -1262,18 +1362,20 @@ export class BrowserUI {
 
   private renderRuntimeOverlays(): string {
     const out: string[] = [];
-    if (this.banner.length > 0) out.push(`<button class="event-banner ${h(this.bannerKind)}" data-action="banner-click">${icon(this.bannerKind === 'threat' || this.bannerKind === 'warn' ? 'xf_status_danger' : 'xf_status_info')}<span>${h(this.banner)}</span></button>`);
+    if (this.banner.length > 0) out.push(`<button class="event-banner ${h(this.bannerKind)}" data-action="banner-click">${icon(this.bannerIcon())}<span>${h(this.banner)}</span></button>`);
     if (this.eventTitle.length > 0) out.push(`<button class="season-event" data-action="close-event">${icon(this.eventIcon)}<span><b>${h(this.eventTitle)}</b><small>${h(this.eventText)}</small></span></button>`);
     if (this.introId.length > 0) {
       const topic = this.session.guide().topic(this.introId);
       if (topic !== null) out.push(this.renderIntroOverlay(topic));
     }
     if (this.offlineReport !== null) out.push(this.renderOfflineOverlay(this.offlineReport));
+    if (this.swarmBonus > 0) out.push(this.renderSwarmBonusOverlay());
+    if (this.boostModal) out.push(this.renderBoostOverlay());
     const bear = this.engine().threats.pendingBear();
     if (this.bearModal && bear !== null && bear.phase === 'warning') out.push(this.renderBearOverlay(bear));
     if (this.confirmState !== null) {
       const state = this.confirmState;
-      out.push(`<div class="modal-layer"><section class="modal-card confirm-card">${icon(state.dangerous ? 'xf_status_danger' : 'xf_status_info')}<h2>${h(state.title)}</h2><p>${h(state.message)}</p><div class="choice-row">${button('confirm-cancel', '取消')}${button('confirm-accept', h(state.confirmLabel), { primary: !state.dangerous, danger: state.dangerous })}</div></section></div>`);
+      out.push(`<div class="modal-layer"><section class="modal-card confirm-card">${icon(state.dangerous ? 'xf_status_danger' : 'xf_action_help')}<h2>${h(state.title)}</h2><p>${h(state.message)}</p><div class="choice-row">${button('confirm-cancel', '取消')}${button('confirm-accept', h(state.confirmLabel), { primary: !state.dangerous, danger: state.dangerous })}</div></section></div>`);
     }
     if (this.legal.length > 0) out.push(this.renderLegalOverlay());
     if (this.toastText.length > 0) out.push(`<button class="toast" data-action="dismiss-toast">${h(this.toastText)}</button>`);
@@ -1372,7 +1474,63 @@ export class BrowserUI {
       case 'claim-overflow': this.feedback(e.claimOverflow()); break;
       case 'codex-tab': this.codexTab = id; break;
       case 'toggle-setting': this.toggleSetting(id); return;
-      case 'set-speed': this.setSpeed(Number(value)); return;
+      case 'open-boost': this.boostModal = true; this.session.audio.play('ui_open_panel'); break;
+      case 'close-boost': this.boostModal = false; break;
+      case 'ad-boost': {
+        const tier = AD_REWARDS.boostTiers.find((item) => item.speed === Number(value));
+        if (tier === undefined) return;
+        const tiers = AD_REWARDS.boostTiers;
+        this.runAd(AdPlacement.FlowerBoost, tier.ads, (index) => {
+          // 第 1 个广告给最低档，之后每看完一个升一档，直到所选档位
+          const reached = tiers.filter((item) => item.ads <= index + 1 && item.speed <= tier.speed);
+          this.session.ads.applyBoost(reached.length > 0 ? reached[reached.length - 1].speed : tiers[0].speed);
+        }, (result) => {
+          if (result.completed > 0) {
+            this.boostModal = false;
+            this.showToast(`⚡ ${this.session.ads.boostSpeed()}× 花潮加速开启，持续 ${AD_REWARDS.boostMinutes} 分钟${result.status === 'partial' ? '（第二个广告未看完，保留 2×）' : ''}`);
+          }
+        });
+        return;
+      }
+      case 'ad-offline-double': {
+        const report = this.offlineReport;
+        if (report === null) return;
+        this.runAd(AdPlacement.OfflineDouble, 1, () => {
+          grantOfflineDouble(e, report);
+          this.offlineReport = null;
+          this.session.dismissOffline();
+          this.showToast('离线收益已翻倍');
+        });
+        return;
+      }
+      case 'ad-bear-aid':
+        this.runAd(AdPlacement.BearAid, 1, () => {
+          if (grantBearAid(e, id)) { this.bearModal = false; this.bearPromptKey = ''; this.showToast('援军赶走了熊'); }
+          else this.showToast('熊已经离开了');
+        });
+        return;
+      case 'ad-winter-supply':
+        this.runAd(AdPlacement.WinterSupply, 1, () => {
+          const got = grantWinterSupply(e);
+          this.showToast(`获得 ${Math.round(got)} 蜂蜜`);
+        });
+        return;
+      case 'ad-revive':
+        this.runAd(AdPlacement.ColonyRevive, 1, () => {
+          const ok = this.session.reviveColonyFree();
+          this.showToast(ok ? '蜂群重新振作起来了' : '蜂群状态已变化，未能重振', !ok);
+        });
+        return;
+      case 'ad-swarm-bonus': {
+        const extra = this.swarmBonus;
+        this.runAd(AdPlacement.SwarmBonus, 1, () => {
+          grantSwarmBonus(this.engine(), extra);
+          this.swarmBonus = 0;
+          this.showToast(`额外获得 ${extra} 传承点`);
+        });
+        return;
+      }
+      case 'close-swarm-bonus': this.swarmBonus = 0; break;
       case 'set-skin': this.setSkin(id); return;
       case 'confirm-reset-progress': this.requestConfirm('清除游戏进度', '当前蜂群、资源、建筑与本轮进度将被清除，设置和隐私同意记录会保留。', '清除进度', () => this.resetProgress(true)); return;
       case 'confirm-delete-all': this.requestConfirm('删除全部本地数据', '游戏进度、设置、图鉴与隐私同意记录都会从当前浏览器删除。', '全部删除', () => this.resetProgress(false)); return;
@@ -1474,6 +1632,15 @@ export class BrowserUI {
 
   private startPlacing(building: string): void {
     if (!this.engine().hive.buildingAvailable(building)) return;
+    // 没有空格时不进入放置模式，直接引导去扩建
+    if (!this.engine().run.hive.cells.some((c) => c.unlocked && c.building.length === 0)) {
+      this.showToast('蜂巢没有空格了：先用蜂蜡扩建外圈', true);
+      this.focusTarget = 'expand'; this.focusUntil = Date.now() + 6000;
+      this.view = 'hive';
+      this.closePanel(false);
+      this.refreshGame(true);
+      return;
+    }
     this.placing = building;
     this.view = 'hive';
     this.focusTarget = 'hive'; this.focusUntil = Date.now() + 6000;
@@ -1549,10 +1716,12 @@ export class BrowserUI {
     const target = this.engine().w.cfg.regions.find((region) => region.id === this.swarmTarget);
     if (target === undefined) return;
     this.requestConfirm(`前往${target.name}`, '本轮蜂群、资源、建筑与研究将重置；传承点、天赋、图鉴、成就和设置永久保留。', '确认分蜂', () => {
+      const points = this.engine().swarmPreview().total;
       const result = this.engine().swarm(target.id);
       this.feedback(result);
       if (result.ok) {
         this.session.saveNow();
+        if (points > 0 && this.session.ads.remaining(AdPlacement.SwarmBonus) > 0) this.swarmBonus = swarmBonusPoints(points);
         this.swarmTarget = '';
         this.view = 'hive';
         this.closePanel(false);
@@ -1581,15 +1750,6 @@ export class BrowserUI {
     this.refreshGame(true);
   }
 
-  private setSpeed(speed: number): void {
-    if (![1, 2, 4].includes(speed)) return;
-    this.engine().state.meta.settings.gameSpeed = speed;
-    this.engine().saveRequested = true;
-    this.session.audio.play('ui_tab');
-    this.session.saveNow();
-    this.refreshGame(true);
-  }
-
   private setSkin(id: string): void {
     const e = this.engine();
     if (!e.state.meta.skins.includes(id) || !e.w.cfg.skins.some((skin) => skin.id === id)) return;
@@ -1604,6 +1764,7 @@ export class BrowserUI {
     if (!keepSettings) this.session.deleteAllData();
     this.session.resetProgress(keepSettings);
     this.offlineReport = null; this.bearModal = false; this.introId = ''; this.confirmState = null;
+    this.boostModal = false; this.swarmBonus = 0;
     this.panel = ''; this.legal = ''; this.drawerOpen = false; this.placing = '';
     this.selectedCell = ''; this.selectedField = ''; this.view = 'field';
     this.screen = keepSettings ? 'home' : 'privacy';

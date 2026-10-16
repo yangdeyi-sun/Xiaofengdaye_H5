@@ -1,10 +1,12 @@
 {
   "name": "xiaofengdaye-h5",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:release": "node scripts/build.mjs --minify",
+    "audio": "node scripts/convert-audio.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node scripts/test.mjs && node scripts/test-platform.mjs",
     "verify:core": "node scripts/verify-core-parity.mjs",

@@ -53,6 +53,8 @@ function tryExpand(): boolean {
 }
 
 let clickAcc = 0;
+// 点击频率倍率：SIM_TAPS=0.5 模拟每秒只点 1 次的休闲玩家
+const tapScale = Number((globalThis as unknown as { process?: { env: Record<string, string | undefined> } }).process?.env.SIM_TAPS ?? '1') || 1;
 let sec = 0;
 let swarmed = 0;
 const maxT = argHours * 3600;
@@ -65,7 +67,7 @@ while (eng.run.time < maxT) {
   const fr = w.role(Role.Forager);
   // 手动点击：开局 2 次/秒，采集蜂多了就停止（自动化后手动需求下降）
   if (fr < 4) {
-    clickAcc += 0.1 * (w.unlocked('t_first_scout') ? 3 : 2);
+    clickAcc += 0.1 * (w.unlocked('t_first_scout') ? 3 : 2) * tapScale;
     while (clickAcc >= 1) {
       eng.collect('f0', 1);
       clickAcc -= 1;
@@ -170,12 +172,14 @@ interface Check { name: string; key: string; min: number; max: number; }
 const checks: Check[] = [
   { name: '第一次获得资源 ≤30秒', key: 'first_nectar', min: 0, max: 30 },
   { name: '第一次产卵 ≤2分钟', key: 'first_egg', min: 0, max: 120 },
-  { name: '首个侦察蜂室 约1分钟', key: 'first_scout_room', min: 30, max: 90 },
-  { name: '第一只侦察蜂 约1.5分钟', key: 'first_scout', min: 60, max: 150 },
-  { name: '第一只采集蜂 7~12分钟', key: 'first_forager', min: 420, max: 720 },
-  { name: '基础自动循环 ≤15分钟', key: 'auto_loop', min: 0, max: 900 },
-  { name: '第一次扩建 18~30分钟', key: 'first_expand', min: 1080, max: 1800 },
-  { name: '首个冬季在30分钟后', key: 'first_winter_start', min: 1800, max: 1e9 },
+  // 0.3 新手节奏：储蜜格从约 19 分钟提前到 4~8 分钟（休闲玩家 SIM_TAPS=0.25 约 7.5 分钟）
+  { name: '首个侦察蜂室 ≤1.5分钟', key: 'first_scout_room', min: 0, max: 90 },
+  { name: '第一只侦察蜂 ≤2.5分钟', key: 'first_scout', min: 0, max: 150 },
+  { name: '第一只采集蜂 2~6分钟', key: 'first_forager', min: 120, max: 360 },
+  { name: '基础自动循环 ≤8分钟', key: 'auto_loop', min: 0, max: 480 },
+  { name: '第一个储蜜格 3~9分钟', key: 'first_storage', min: 180, max: 540 },
+  { name: '第一次扩建 ≤15分钟', key: 'first_expand', min: 0, max: 900 },
+  { name: '首个冬季在20分钟后', key: 'first_winter_start', min: 1200, max: 1e9 },
   { name: '度过冬季', key: 'survived_winter', min: 0, max: 1e9 },
   { name: '完成首次分蜂', key: 'swarm_1', min: 0, max: 1e9 },
 ];

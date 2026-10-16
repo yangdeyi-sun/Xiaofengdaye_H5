@@ -107,9 +107,9 @@ const BUILDINGS: BuildingDef[] = [
   { id: Bld.ScoutRoom, name: '侦察蜂巢房', desc: '解锁侦察蜂', adjacency: '无',
     costs: [c(Res.Honey, 60, 4)], maxCount: 3, unlockTask: 't_first_egg' },
   { id: Bld.ForagerRoom, name: '采集蜂巢房', desc: '解锁采集蜂', adjacency: '无',
-    costs: [c(Res.Honey, 230, 3)], maxCount: 3, unlockTask: 't_first_dance' },
+    costs: [c(Res.Honey, 140, 3)], maxCount: 3, unlockTask: 't_first_dance' },
   { id: Bld.Storage, name: '储蜜格', desc: '提升资源上限并承担越冬储备，开启正式四季', adjacency: '储蜜格彼此相邻提高总容量',
-    costs: [c(Res.Honey, 220, 1.7)], maxCount: 30, unlockTask: 't_auto_loop' },
+    costs: [c(Res.Honey, 160, 1.7)], maxCount: 30, unlockTask: 't_auto_loop' },
   { id: Bld.Nursery, name: '育婴房', desc: '增加孵化队列与人口上限', adjacency: '靠近蜂后室提高孵化效率',
     costs: [c(Res.Honey, 220, 1.8), c(Res.Wax, 8, 1.6)], maxCount: 12, unlockTask: 't_first_expand' },
   { id: Bld.Brewery, name: '酿蜜房', desc: '解锁巢内工蜂，花蜜与蜂蜜形成可管理的产线', adjacency: '靠近储蜜格提高加工与入库效率',
@@ -359,11 +359,15 @@ function tu(id: string, title: string, text: string, focus: string, doneTask: st
   return d;
 }
 
-// 只强制三步基础教学；其余系统由 Guide 的可关闭气泡按需介绍。
+// 新手引导节点：采蜜 → 产卵 → 侦察蜂巢房 → 侦察蜂 → 采集蜂巢房 → 采集蜂 → 储蜜格（之后的系统由 Guide 气泡按需介绍）。
 const TUTORIAL: TutorialStepDef[] = [
   tu('tap', '采集花蜜', '点击花田里的花朵，采集第一份花蜜。蜂巢会把花蜜慢慢转化为蜂蜜。', 'field', 't_first_nectar'),
   tu('egg', '蜂后产卵', '蜂蜜够了！打开「蜂后」，消耗蜂蜜产下第一只幼虫。', 'queen', 't_first_egg'),
-  tu('scoutRoom', '建造侦察蜂巢房', '切换到蜂巢，点击蜂后室旁的空格，建造侦察蜂巢房。', 'hive', 't_build_scout')
+  tu('scoutRoom', '建造侦察蜂巢房', '切换到蜂巢，点击蜂后室旁的空格，建造侦察蜂巢房。', 'hive', 't_build_scout'),
+  tu('scout', '培养侦察蜂', '把幼虫培养成侦察蜂，它会去找新的花田。', 'queen', 't_first_scout'),
+  tu('foragerRoom', '建造采集蜂巢房', '侦察蜂跳完摇摆舞后，建造采集蜂巢房。', 'hive', 't_build_forager'),
+  tu('forager', '培养采集蜂', '培养第一只采集蜂，之后蜂后会自动产卵、自动培养。', 'queen', 't_first_forager'),
+  tu('storage', '建造储蜜格', '蜂巢会自动为储蜜格攒蜂蜜，攒够后建造储蜜格，正式四季开始。', 'hive', 't_build_storage')
 ];
 
 export const DEFAULT_CONFIG: GameConfigDef = {
@@ -371,7 +375,7 @@ export const DEFAULT_CONFIG: GameConfigDef = {
   schemaVersion: 2,
   economy: {
     manualYield: 2,
-    baseConvertRate: 1.2,
+    baseConvertRate: 3.0,
     perBeeConvert: 0.12,
     baseConvertRatio: 0.5,
     houseBrewRate: 1.5,

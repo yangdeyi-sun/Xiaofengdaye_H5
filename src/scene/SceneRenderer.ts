@@ -221,7 +221,8 @@ export class SceneRenderer {
 
   /** 屏幕级特效（季节、任务、成就、分蜂、失败、溢出） */
   screenFx(atlas: string, anim: string): void {
-    this.shot(atlas, anim, 0.5, 0.3, 150, 'screen');
+    // 放在屏幕上方、尺寸受限：避免盖住蜂巢中央的蜂后和建筑
+    this.shot(atlas, anim, 0.5, 0.13, 96, 'screen');
   }
 
   /** UI 命令失败时的反馈（vfx_17） */
@@ -305,8 +306,9 @@ export class SceneRenderer {
         this.shot('atlas_bees_larva', 'differentiate', q + 0.25, r + 0.2, 0.9, 'hivecell');
       } else if (e.kind === 'build' || e.kind === 'expand') {
         this.addText('hive', e.x, e.y, e.text, '#FFFFFF', true, '');
-        this.shot('atlas_construction', e.kind, e.x, e.y, 1.7, 'hivecell');
-        this.shot(e.kind === 'build' ? 'atlas_vfx_06' : 'atlas_vfx_07', e.kind, e.x, e.y, 1.6, 'hivecell');
+        // 建造是即时完成的；特效只在本格内播放，不遮住蜂后和相邻巢房
+        this.shot('atlas_construction', e.kind, e.x, e.y, 0.72, 'hivecell');
+        this.shot(e.kind === 'build' ? 'atlas_vfx_06' : 'atlas_vfx_07', e.kind, e.x, e.y, 0.7, 'hivecell');
         this.burstCell(e.x, e.y);
       } else if (e.kind === 'upgrade') {
         const lv = e.text.lastIndexOf('Lv');
@@ -1319,7 +1321,8 @@ export class SceneRenderer {
       }
       o.alpha = Math.min(1, (s.dur - s.t) * 4);
       if (view === 'screen') {
-        Sprites.draw(ctx, s.atlas, s.anim, s.t, s.x * w, s.y * h, Math.min(s.size, w * 0.5), o);
+        o.alpha = o.alpha * 0.9;
+        Sprites.draw(ctx, s.atlas, s.anim, s.t, s.x * w, Math.max(s.y * h, 70), Math.min(s.size, w * 0.26), o);
       } else {
         Sprites.draw(ctx, s.atlas, s.anim, s.t, s.x + ox, s.y + oy, s.size, o);
       }

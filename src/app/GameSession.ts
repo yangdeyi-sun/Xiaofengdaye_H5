@@ -15,8 +15,11 @@ import { BrowserArt } from '../platform/BrowserArt';
 import { BrowserAudioService } from '../platform/BrowserAudioService';
 import { BrowserSaveRepository } from '../platform/BrowserSaveRepository';
 import { TimeService } from '../platform/TimeService';
+import { platform } from '../platform/Platform';
+import { AdService } from './ads/AdService';
 
-export const PRIVACY_VERSION = '2026-10-01';
+/** 隐私政策版本；改版后玩家会被重新要求同意 */
+export const PRIVACY_VERSION = '2026-10-16';
 
 const SEASON_NAMES: Record<string, string> = {
   tutorial: '新手春季', spring: '春季', summer: '夏季', autumn: '秋季', winterPrep: '冬季将至', winter: '冬季'
@@ -38,6 +41,10 @@ export class GameSession {
   renderer: SceneRenderer | null = null;
   readonly repo = new BrowserSaveRepository();
   readonly audio = new BrowserAudioService();
+  /** 所有广告点位统一经过 AdService；底层 SDK 由平台层提供 */
+  readonly ads = new AdService(platform().ads, platform().storage);
+  /** 广告播放期间暂停模拟，玩家看广告不会错过敌害或冬季 */
+  private adPaused = false;
   status = 'boot';
   bootError = '';
   pendingOffline: OfflineReport | null = null;
@@ -60,6 +67,20 @@ export class GameSession {
   private readonly drawers = new Map<string, () => void>();
   private readonly uiListeners = new Set<() => void>();
 
+  constructor() {
+    this.ads.onAdStart = () => {
+      this.adPaused = true;
+      this.audio.pauseMusic();
+    };
+    this.ads.onAdEnd = () => {
+      this.adPaused = false;
+      this.last = platform().perfNow();
+      if (this.raf !== 0) this.audio.resumeMusic();
+    };
+    // 广告打点：接入平台数据分析（如 tt.reportAnalytics）时在这里转发
+    this.ads.onEvent = (event) => console.info('[ad]', event.type, event.placement, event.detail);
+  }
+
   get ready(): boolean { return this.eng !== null; }
   get lowPower(): boolean { return this.lowPowerOn; }
   set lowPower(value: boolean) { this.lowPowerOn = value; Sprites.lowOnly = value; }
@@ -77,7 +98,7 @@ export class GameSession {
     if (errors.length > 0) console.error('配置校验失败', errors);
     ArtEnv.fontUnit = 'px';
     ArtEnv.fontFamily = '"Noto Sans SC", "Microsoft YaHei", sans-serif';
-    Sprites.src = new BrowserArt('./');
+    Sprites.src = new BrowserArt();
     Sprites.atlasCropEnabled = true;
     Sprites.bitmapState = 0;
     if (!this.repo.available) {
@@ -129,17 +150,17 @@ export class GameSession {
 
   start(): void {
     if (this.raf !== 0 || this.eng === null) return;
-    this.last = performance.now();
+    this.last = platform().perfNow();
     const loop = (now: number): void => {
-      this.raf = requestAnimationFrame(loop);
+      this.raf = platform().requestFrame(loop);
       this.frame(now);
     };
-    this.raf = requestAnimationFrame(loop);
-    this.audio.resumeMusic();
+    this.raf = platform().requestFrame(loop);
+    if (!this.adPaused) this.audio.resumeMusic();
   }
 
   stop(): void {
-    if (this.raf !== 0) cancelAnimationFrame(this.raf);
+    if (this.raf !== 0) platform().cancelFrame(this.raf);
     this.raf = 0;
     this.audio.pauseMusic();
   }
@@ -150,9 +171,10 @@ export class GameSession {
     if (engine === null || renderer === null) return;
     const dt = Math.min(0.25, Math.max(0, (now - this.last) / 1000));
     this.last = now;
-    const speed = [1, 2, 4].includes(engine.state.meta.settings.gameSpeed) ? engine.state.meta.settings.gameSpeed : 1;
+    // 游戏速度只来自“花潮加速”广告奖励；设置里的旧速度字段不再生效
+    const speed = this.adPaused ? 0 : this.ads.boostSpeed();
     try {
-      engine.advance(dt * speed);
+      if (speed > 0) engine.advance(dt * speed);
       if (engine.run.season.season === SeasonId.WinterPrep && engine.run.season.cycleIndex !== this.checkpointCycle) {
         this.checkpointCycle = engine.run.season.cycleIndex;
         this.saveWinterCheckpoint();
@@ -231,7 +253,11 @@ export class GameSession {
         const season = this.engine().run.season.season;
         this.audio.play(season === SeasonId.WinterPrep ? 'season_winter_warning' : `season_${season === SeasonId.Tutorial ? SeasonId.Spring : season}`);
       }
-      else if (event.kind === 'spring') this.audio.play('winter_survived');
+      else if (event.kind === 'spring') {
+        this.audio.play('winter_survived');
+        // 熬过冬天是天然的断点，按节奏规则尝试展示插屏
+        void this.ads.maybeInterstitial('winter_survived');
+      }
       else if (event.kind === 'victory') { this.audio.play(`victory_${this.enemyAudioKey(event.text)}`); this.audio.vibrate(30); }
       else if (event.kind === 'task' || event.kind === 'milestone' || event.kind === 'bloom') this.audio.play(event.kind);
       else if (event.kind === 'swarm') { this.audio.play('swarm_depart'); this.audio.vibrate(60); setTimeout(() => this.audio.play('swarm_arrive'), 2600); }
@@ -354,6 +380,15 @@ export class GameSession {
     this.useState(state);
     this.saveNow();
     return true;
+  }
+
+  /** 广告奖励：免费重振蜂群（不消耗传承点） */
+  reviveColonyFree(): boolean {
+    if (this.eng === null || !this.eng.run.colony.collapsed) return false;
+    this.eng.state.meta.inheritance.available += 1;
+    if (this.recoverColonyWithPoint()) return true;
+    this.eng.state.meta.inheritance.available -= 1;
+    return false;
   }
 
   restoreWinterCheckpoint(): boolean {

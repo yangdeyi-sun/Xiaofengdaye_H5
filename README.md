@@ -6,6 +6,10 @@
 
 功能迁移明细及平台边界见 [docs/MIGRATION_PARITY.md](docs/MIGRATION_PARITY.md)。
 
+0.2.0 起加入平台抽象层与可选激励视频广告，为上架抖音 / TapTap 小游戏做准备，详见 [docs/ADS_AND_PLATFORMS.md](docs/ADS_AND_PLATFORMS.md)。
+
+0.3.0 修复新手节奏、换季弹窗图片、蜂巢图标被遮挡、侧边栏跳回顶部等问题，并重新划分音频，详见 [docs/CHANGELOG_0.3.md](docs/CHANGELOG_0.3.md)；音频制作清单见 [docs/AUDIO_PLAN.md](docs/AUDIO_PLAN.md)。
+
 ## 环境要求
 
 - Node.js 18 或更高版本
@@ -63,10 +67,12 @@ npm run build
 | --- | --- | --- |
 | `npm run verify:core` | 逐字节比较 H5 与 HarmonyOS 的 `common/domain/scene` 核心源码 | 输出“核心源码一致” |
 | `npm run check` | 以严格模式检查全部 H5 TypeScript | 无类型错误 |
-| `npm test` | 先执行从原工程原样复制的领域测试，再检查浏览器存档、时间与单写者适配 | `69 passed, 0 failed`，随后 `15 browser adapter checks passed` |
+| `npm test` | 先执行从原工程原样复制的领域测试，再检查存档、时间、单写者、广告服务与广告奖励 | `70 passed, 0 failed`，随后 `34 browser adapter checks passed` |
 | `npm run sim` | 运行原版四小时整局仿真 | 完成节奏与不变量检查 |
 | `npm run perf` | 运行原版 10000 只逻辑蜜蜂性能脚本 | 脚本正常结束 |
-| `npm run build` | 清空并重新生成生产目录 `dist/` | 生成入口、脚本、样式和完整素材 |
+| `npm run build` | 清空并重新生成生产目录 `dist/` | 生成入口、脚本、样式和素材，并打印包体大小 |
+| `npm run build:release` | 压缩代码、不带 sourcemap 的发布构建 | 同上 |
+| `npm run audio` | 把 `public/audio` 的 WAV/OGG 母带转成 MP3（需 ffmpeg） | 输出转码数量 |
 
 `sim` 与 `perf` 是补充验证，不替代浏览器交互验收。改动任何核心规则、配置或存档代码后，至少应依次运行 `verify:core`、`check`、`test` 和 `build`。
 
@@ -126,7 +132,7 @@ xiaofengdaye-h5/
 
 H5 继续使用原 `SaveCodec`，表示存档数据结构与校验/迁移规则一致，不表示网页能直接读取 HarmonyOS 应用私有目录。既有 HarmonyOS 存档不会自动出现在浏览器中。
 
-浏览器通常会在第一次用户操作前阻止声音播放，游戏会在首次交互后启用音频。`navigator.vibrate` 在 iOS 和部分桌面浏览器不可用，无法振动时不影响游戏规则。音乐、环境和天气使用 OGG Vorbis；如果目标浏览器不支持该格式，这三类长音轨不会播放，短音效仍使用 WAV。
+浏览器通常会在第一次用户操作前阻止声音播放，游戏会在首次交互后启用音频。`navigator.vibrate` 在 iOS 和部分桌面浏览器不可用，无法振动时不影响游戏规则。运行时音频统一使用 MP3，放在 `public/audio/v2/`（见 docs/AUDIO_PLAN.md）；缺少的文件会被静音跳过。WAV/OGG 母带不会进入构建产物。
 
 ## H5 平台边界
 
@@ -137,4 +143,4 @@ H5 版保留单机经营与长期成长玩法，但静态网页无法等价提�
 - 振动、后台运行、音频焦点和存储持久性受浏览器限制。
 - 普通网页不能可靠关闭并非由脚本打开的标签页；拒绝隐私条款时会阻止进入游戏，由用户自行关闭页面。
 
-本次迁移严格保持原 0.1 单机范围，没有增加联机共生花谷、蜂王竞速、排行榜、花潮事件、广告、内购、账号、云存档、遥测或游戏数据上传功能。
+0.1 迁移严格保持原单机范围。0.2.0 新增了可选的激励视频广告（H5 中为测试广告），以及“花潮加速”等广告奖励，原设置中的免费 1×/2×/4× 游戏速度已取消；仍然没有联机、排行榜、内购、账号、云存档或游戏数据上传功能。
