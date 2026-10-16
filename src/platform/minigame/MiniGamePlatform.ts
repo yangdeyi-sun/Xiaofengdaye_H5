@@ -72,13 +72,13 @@ class MiniAudio implements AudioBackend {
 }
 
 class MiniImages implements ImageLoader {
-  constructor(private readonly api: MiniGameApi, private readonly base: string) {}
+  constructor(private readonly api: MiniGameApi, private readonly base: string, private readonly extension = 'webp') {}
   load(path: string): Promise<DrawableImage> {
     return new Promise<DrawableImage>((resolve, reject) => {
       const image = this.api.createImage();
       image.onload = () => resolve(image as unknown as DrawableImage);
       image.onerror = (err) => reject(err instanceof Error ? err : new Error(`image ${path}`));
-      image.src = this.base + path;
+      image.src = this.base + path.replace(/\.webp$/, `.${this.extension}`);
     });
   }
 }
@@ -106,8 +106,7 @@ class MiniAds implements AdBackend {
     if (existing !== undefined) return existing;
     const ad = this.api.createRewardedVideoAd({ adUnitId: unitId });
     ad.onClose((res: MiniRewardedCloseResult | undefined) => {
-      // 老版本基础库在用户看完后 res 可能为 undefined，按看完处理
-      const ended = res === undefined || res.isEnded === true;
+      const ended = res?.isEnded === true;
       this.settle({ status: ended ? 'completed' : 'skipped', detail: `count=${res?.count ?? ''}` });
     });
     ad.onError((err: unknown) => {
@@ -125,8 +124,7 @@ class MiniAds implements AdBackend {
 
   showRewarded(placement: string): Promise<RewardedResult> {
     const unitId = this.unitFor(placement);
-    // 还没在 adUnits.ts 填广告位 ID：按“占位”处理，直接视为看完（上线前务必填好）
-    if (unitId.length === 0) return Promise.resolve({ status: 'completed', detail: `placeholder:${placement}` });
+    if (unitId.length === 0) return Promise.resolve({ status: 'unavailable', detail: `unconfigured:${placement}` });
     if (this.pending !== null) return Promise.resolve({ status: 'unavailable', detail: 'busy' });
     let ad: MiniRewardedVideoAd;
     try {
@@ -174,6 +172,7 @@ export interface MiniGamePlatformOptions {
   adUnits: AdUnitConfig;
   /** 资源根路径：留空表示包内资源；填 CDN 地址（以 / 结尾）则从远程加载 */
   assetBase?: string;
+  imageExtension?: 'webp' | 'png';
 }
 
 export class MiniGamePlatform implements Platform {
@@ -190,7 +189,7 @@ export class MiniGamePlatform implements Platform {
     this.api = options.api;
     this.storage = new MiniStorage(options.api);
     this.audio = new MiniAudio(options.api, base);
-    this.images = new MiniImages(options.api, base);
+    this.images = new MiniImages(options.api, base, options.imageExtension);
     this.ads = new MiniAds(options.api, options.adUnits);
   }
 

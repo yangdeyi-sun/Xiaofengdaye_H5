@@ -2,6 +2,7 @@ import { build } from 'esbuild';
 import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { legalDefines } from './release-config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
@@ -38,9 +39,18 @@ await build({
   target: ['es2020'],
   minify: process.argv.includes('--minify'),
   sourcemap: !process.argv.includes('--minify'),
-  define: { __AUDIO_FILES__: JSON.stringify(audioFiles) },
+  define: { __AUDIO_FILES__: JSON.stringify(audioFiles), __PRODUCTION__: JSON.stringify(process.argv.includes('--minify')), ...legalDefines },
   logLevel: 'info'
 });
+if (process.argv.includes('--canvas-preview')) {
+await build({
+  entryPoints: [path.join(root, 'src/app/minigame/preview.ts')],
+  outfile: path.join(dist, 'assets/canvas-preview.js'), bundle: true, format: 'esm', target: ['es2020'],
+  minify: true, define: { __AUDIO_FILES__: JSON.stringify(audioFiles), __PRODUCTION__: 'true', ...legalDefines }
+});
+await (await import('node:fs/promises')).writeFile(path.join(dist, 'canvas-preview.html'),
+  '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>小峰大业 · 小游戏预览</title><style>body{margin:0;overflow:hidden}canvas{display:block;width:100vw;height:100vh;touch-action:none}</style><canvas aria-label="小游戏画布"></canvas><script type="module" src="./assets/canvas-preview.js"></script></html>');
+}
 await cp(path.join(root, 'index.html'), path.join(dist, 'index.html'));
 await cp(path.join(root, 'styles.css'), path.join(dist, 'styles.css'));
 const publicDir = path.join(root, 'public');

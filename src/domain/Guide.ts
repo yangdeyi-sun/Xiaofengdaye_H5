@@ -1,5 +1,5 @@
 import { GameEngine } from './GameEngine';
-import { ALL_ROLES, Bld, BuildingDef, Res, Role, SeasonId, TaskDef, ThreatType, UpgradeTrackDef } from './Types';
+import { Bld, Res, Role, SeasonId, ThreatType, UpgradeTrackDef } from './Types';
 import { FlowerField, HexCell, ThreatEvent } from './State';
 
 /**
@@ -7,7 +7,7 @@ import { FlowerField, HexCell, ThreatEvent } from './State';
  * 1. 新事物介绍：玩家第一次遇到某样东西（花丛、蜂后、幼虫、某种巢房、某种敌害、四季……）时弹一次，
  *    只讲“这是什么、有什么用”，不规定下一步必须做什么；看过即记入存档 meta.introsSeen。
  * 2. 提示行：顶部一行写“新开放了什么 / 现在可以试试什么 / 需要注意什么”，点一下可定位或打开对应内容。
- * 新手阶段：从开局到建成第一个储蜜格（t_build_storage）；该阶段提示行常驻，之后只在有新内容或预警时出现。
+ * 新手阶段：从开局到分化第一只侦察蜂（t_first_scout）；该阶段提示行常驻，之后只在有新内容或预警时出现。
  */
 
 export class IntroTopic {
@@ -97,7 +97,13 @@ function hasOverflow(e: GameEngine): boolean {
 }
 
 export const INTRO_TOPICS: IntroTopic[] = [
-  // ---------------- 新手阶段（到第一个储蜜格为止） ----------------
+  new IntroTopic('handover', '蜜蜂王国交给你了', '接下来，这个蜜蜂王国就交由你把握它的发展了！',
+    '观察哪一环跟不上：缺蜂蜜就改善酿蜜，缺花蜜就补采集，花源不足就侦察和升级。自由安排孵化、分化与建造；以后只在首次遇到新事物时介绍它的作用。',
+    'xf_nav_queen', '', '', (e: GameEngine) => e.state.meta.tutorialDone),
+  new IntroTopic('flowerRecovery', '花丛也需要休息', '每片花丛的花蜜有限，采空后会暂时停止供应。',
+    '等待恢复倒计时结束，或采集另一片花丛。侦察蜂能寻找更多花源；侦察房的花源储量和恢复效率升级能缓解原料短缺。',
+    'xf_flower_wild', 'field', 'field', (e: GameEngine) => e.run.map.fields.some((f: FlowerField) => f.depletedAt !== undefined)),
+  // ---------------- 新手阶段（到第一只侦察蜂为止） ----------------
   new IntroTopic('flowers', '花丛', '蜂巢旁的野花丛，是花蜜的来源。',
     '点击花丛就能采集花蜜，花蜜会被蜂巢慢慢酿成蜂蜜。', 'xf_flower_wild', 'field', 'field',
     (e: GameEngine) => true),
@@ -105,8 +111,8 @@ export const INTRO_TOPICS: IntroTopic[] = [
     '产卵、建造、升级都要用到蜂蜜；顶部会显示数量和每秒增长。', 'xf_res_honey', '', '',
     (e: GameEngine) => e.w.unlocked('t_first_nectar')),
   new IntroTopic('queen', '蜂后', '住在蜂巢中心，蜂群里唯一会产卵的蜜蜂。',
-    '点花田中央的蜂箱，就能找到蜂后：消耗蜂蜜让她产卵，卵会孵成幼虫。', 'xf_nav_queen', 'hiveIcon', 'field',
-    (e: GameEngine) => e.colony.canLay().ok || e.run.colony.eggsLaid > 0),
+    '点花田中央的蜂箱，就能找到蜂后：点击孵化消耗蜂蜜获得幼虫，再亲自选择工种分化。累计孵化越多，新卵越贵。', 'xf_nav_queen', 'hiveIcon', 'field',
+    (e: GameEngine) => e.w.count(Bld.Brewery) > 0 || e.run.colony.eggsLaid > 0),
   new IntroTopic('larva', '幼虫', '刚出生的小蜜蜂，还没有决定做什么工作。',
     '先在蜂巢里建好对应的巢房，就能把幼虫培养成侦察蜂、采集蜂等不同工种。', 'xf_talent_b_hatch', 'queen', 'hive',
     (e: GameEngine) => e.run.colony.eggsLaid > 0),
@@ -126,9 +132,6 @@ export const INTRO_TOPICS: IntroTopic[] = [
   new IntroTopic('forager', '采集蜂', '提着花粉篮的勤劳蜜蜂。',
     '会沿着航线自动往返已标记的花田；航线越粗，去那里的蜜蜂越多。', 'xf_role_forager', '', 'field',
     (e: GameEngine) => e.w.role(Role.Forager) > 0),
-  new IntroTopic('auto', '自动运转', '蜂后可以自动产卵，幼虫可以按比例自动培养。',
-    '点蜂箱打开蜂后页，打开「自动产卵」「自动培养」，离线时蜂巢也会继续工作。', 'xf_status_automation', 'hiveIcon',
-    'field', (e: GameEngine) => e.w.unlocked('t_first_forager')),
   new IntroTopic('storage', '储蜜格', '储存蜂蜜和花蜜的仓库，冬天全靠它。',
     '建成第一个储蜜格后，正式四季开始，同时开放蜂蜡与扩建。', 'xf_building_storage', 'hive', 'hive',
     (e: GameEngine) => available(e, Bld.Storage)),
@@ -148,7 +151,7 @@ export const INTRO_TOPICS: IntroTopic[] = [
   new IntroTopic('nursery', '育婴房', '照顾幼虫的巢房。', '增加孵化队列和人口上限；放在蜂后室旁边孵得更快。',
     'xf_building_nursery', 'hive', 'hive', (e: GameEngine) => available(e, Bld.Nursery)),
   new IntroTopic('brewery', '酿蜜房', '巢内工蜂工作的地方。',
-    '建成后可以培养巢内工蜂，把花蜜更快地酿成蜂蜜，或分泌蜂蜡。', 'xf_building_brewery', 'hive', 'hive',
+    '建成后立即加快酿蜜；手动分化巢内工蜂能进一步提高加工速度，储蜜格建成后还可以分工产蜡。', 'xf_building_brewery', 'hive', 'hive',
     (e: GameEngine) => available(e, Bld.Brewery)),
   new IntroTopic('house', '巢内工蜂', '系着围裙的巢内工匠。',
     '工具栏「蜂群」里可以分配酿蜜和筑巢（产蜂蜡）的比例。', 'xf_role_house', '', '',
@@ -202,7 +205,7 @@ export class Guide {
     this.eng = eng;
   }
 
-  /** 新手阶段：采蜜 → 产卵 → 侦察蜂巢房 → 侦察蜂 → 采集蜂巢房 → 采集蜂 → 储蜜格（见 GameConfig.TUTORIAL）。 */
+  /** 新手阶段：采蜜 → 酿蜜房 → 手动孵化/工蜂 → 采集房/采集蜂 → 侦察房/侦察蜂（见 GameConfig.TUTORIAL）。 */
   inTutorial(): boolean {
     return !this.eng.state.meta.tutorialDone;
   }
@@ -243,6 +246,7 @@ export class Guide {
     this.syncLegacy();
     for (let i = 0; i < INTRO_TOPICS.length; i++) {
       const t = INTRO_TOPICS[i];
+      if (this.inTutorial() && ['storage', 'wax', 'seasons', 'expand', 'upgrade', 'nursery'].includes(t.id)) continue;
       if (!this.seen(t.id) && t.cond(this.eng)) {
         return t;
       }
@@ -272,6 +276,30 @@ export class Guide {
         out.push(h);
       }
     };
+    if (this.inTutorial()) {
+      const step = w.cfg.tutorial[e.state.meta.tutorialStep];
+      if (step !== undefined) {
+        const buildingByTask: Record<string, string> = {
+          t_build_brewery: Bld.Brewery, t_build_forager: Bld.ForagerRoom, t_build_scout: Bld.ScoutRoom
+        };
+        const building = buildingByTask[step.doneTask];
+        let text = step.text;
+        let action = step.focus === 'hive' ? 'focus:hive@hive' : step.focus === 'queen' ? 'queen' : 'focus:field@field';
+        if (building !== undefined) {
+          const cost = e.hive.buildCost(building);
+          const short = e.reasonsForShortage(cost);
+          text = short.length === 0 ? `蜂蜜够了：建造${w.bldDef(building).name}` : `${step.title} · ${short}。${step.text}`;
+          action = short.length === 0 ? `build:${building}` : 'focus:field@field';
+        } else if (step.focus === 'queen' && step.doneTask !== 't_first_egg') {
+          const target = step.doneTask === 't_first_house' ? Role.House : step.doneTask === 't_first_forager' ? Role.Forager : Role.Scout;
+          const batch = e.run.colony.batches.find((b) => b.targetRole === target);
+          if (batch) text = `${w.roleDef(target).name}分化中 · ${Math.ceil(Math.max(0, batch.finishAt - e.run.time))}秒`;
+          else if (e.run.colony.larvae === 0) text = `先手动孵化新卵，再选择分化为${w.roleDef(target).name}`;
+        }
+        add(new Hint(step.id, text, 'next', action, building ? BLD_ICON[building] : 'xf_nav_tasks'));
+      }
+      return out;
+    }
     // 注意
     const bear = e.threats.pendingBear();
     if (bear !== null && bear.phase !== 'postponed') {
@@ -293,62 +321,10 @@ export class Guide {
       add(new Hint('noGuard', w.count(Bld.GuardRoom) > 0 ? '敌害出现：培养守卫蜂来击退' : '敌害出现：守卫巢房开放后可以防御',
         'warn', w.count(Bld.GuardRoom) > 0 ? 'queen' : 'panel:eco', 'xf_threat_danger'));
     }
-    // 新开放的巢房（可建且还没建过）
-    const opts: BuildingDef[] = e.hive.buildingOptions();
-    for (let i = 0; i < opts.length; i++) {
-      const b = opts[i];
-      if (w.count(b.id) === 0 && e.hive.buildingAvailable(b.id)) {
-        const cost = e.hive.buildCost(b.id);
-        const short = e.reasonsForShortage(cost);
-        const keyBuilding = b.id === Bld.ScoutRoom || b.id === Bld.ForagerRoom || b.id === Bld.Storage;
-        if (keyBuilding && cost.length > 0) {
-          // 新手主线巢房：显示蜂蜜进度与当前酿蜜速度，让玩家知道“还要多久”
-          const need = Math.ceil(cost[0].amount.toNumber());
-          const have = Math.min(need, Math.floor(w.econ.num(Res.Honey)));
-          const rate = e.prod.baseConvertCapacity() * w.cfg.economy.baseConvertRatio;
-          const nectarFull = w.econ.fillRatio(Res.Nectar) >= 0.95;
-          const wait = rate > 0 ? Math.ceil((need - have) / rate) : 0;
-          // 关键信息放在最前面：手机上提示行会被截断
-          let text = `蜂蜜够了：点这里放置${b.name}`;
-          if (short.length > 0) {
-            text = nectarFull ? `花蜜满了，不用再点 · 约 ${wait} 秒后可建${b.name}` :
-              `点花丛采蜜 · ${b.name} 蜂蜜 ${have}/${need}（每秒酿 ${rate.toFixed(1)}）`;
-          }
-          add(new Hint(`new_${b.id}`, text, 'new',
-            short.length === 0 ? `build:${b.id}` : 'focus:field@field',
-            BLD_ICON[b.id] === undefined ? 'xf_action_build' : BLD_ICON[b.id]));
-        } else {
-          add(new Hint(`new_${b.id}`, short.length === 0 ? `可以建造：${b.name}` : `${b.name}已开放（${short}）`, 'new',
-            `build:${b.id}`, BLD_ICON[b.id] === undefined ? 'xf_action_build' : BLD_ICON[b.id]));
-        }
-      }
-    }
-    // 可以试试
-    if (!w.unlocked('t_first_nectar')) {
-      add(new Hint('collect', '点一下花丛，采集第一份花蜜', 'try', 'focus:field@field', 'xf_flower_wild'));
-    }
-    if (w.unlocked('t_first_nectar') && e.run.colony.eggsLaid === 0 && !e.colony.canLay().ok) {
-      const eggCost = e.colony.eggCost();
-      if (eggCost.length > 0) {
-        const need = Math.ceil(eggCost[0].amount.toNumber());
-        const have = Math.min(need, Math.floor(w.econ.num(Res.Honey)));
-        add(new Hint('eggNeed', `首次产卵：蜂蜜 ${have}/${need} · 继续采花，花蜜会自动酿成蜂蜜`, 'next',
-          'focus:field@field', 'xf_nav_queen'));
-      }
-    }
-    if (!e.run.colony.autoLay && e.run.colony.larvae === 0 && e.colony.canLay().ok) {
-      add(new Hint('lay', '蜂蜜够了：点这里直接让蜂后产卵', 'try', 'queen', 'xf_nav_queen'));
-    }
-    if (!e.run.colony.autoHatch && e.run.colony.larvae > 0) {
-      const roles = ALL_ROLES.filter((r: string) =>
-        e.colony.roleAvailable(r) && w.econ.canAfford(e.colony.roleCost(r)));
-      if (roles.length > 0) {
-        add(new Hint('hatch', `有 ${e.run.colony.larvae} 只幼虫可以培养成${w.roleDef(roles[0]).name}`, 'try', 'queen',
-          'xf_talent_b_hatch'));
-      }
-    }
-    if (w.unlocked('t_first_forager') && !e.run.colony.autoLay) {
-      add(new Hint('auto', '可以打开自动产卵，让蜂巢自己运转', 'try', 'queen', 'xf_status_automation'));
+    // 交接后只介绍首次开放的系统，不再指定下一步繁育或建造。
+    const topic = this.pendingIntro();
+    if (topic !== null) {
+      add(new Hint(`intro_${topic.id}`, `新事物：${topic.title}`, 'new', `intro:${topic.id}`, topic.icon));
     }
     if (e.swarmPreview().ready) {
       add(new Hint('swarm', '分蜂条件已达成，可以前往新的种区', 'new', 'panel:swarm', 'xf_nav_split'));
@@ -358,21 +334,14 @@ export class Guide {
       add(new Hint('colonyTask', '蜂群任务完成了，去领取蜂王浆', 'new', 'panel:tasks', 'xf_nav_tasks'));
     }
     const up = upgradeReady(e);
-    if (up.length > 0 && w.unlocked('t_first_forager')) {
+    if (up.length > 0 && w.unlocked('t_first_forager') && !this.seen('upgrade')) {
       add(new Hint(`up_${up}`, `${w.bldDef(up).name}有可以升级的属性`, 'try', `upgrade:${up}`, 'xf_action_upgrade'));
     }
-    if (expandReady(e)) {
+    if (expandReady(e) && !this.seen('expand')) {
       add(new Hint('expand', '蜂蜡够了，可以扩建蜂巢外圈', 'try', 'focus:expand@hive', 'xf_action_expand'));
     }
     if (w.econ.fillRatio(Res.Honey) >= 0.95 && w.unlocked('t_auto_loop')) {
       add(new Hint('full', '蜂蜜仓快满了：再建一个储蜜格或升级容量', 'try', `build:${Bld.Storage}`, 'xf_status_full'));
-    }
-    // 接下来（新手阶段始终给出下一个目标，作为方向而不是指令）
-    if (out.length < max && this.inTutorial()) {
-      const next = w.cfg.tasks.find((t: TaskDef) => t.kind === 'main' && !w.taskDone(t.id));
-      if (next !== undefined) {
-        add(new Hint(`next_${next.id}`, `接下来可以：${next.desc}`, 'next', 'panel:tasks', 'xf_nav_tasks'));
-      }
     }
     return out;
   }

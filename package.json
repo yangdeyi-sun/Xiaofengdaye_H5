@@ -1,6 +1,6 @@
 {
   "name": "xiaofengdaye-h5",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,10 +9,17 @@
     "audio": "node scripts/convert-audio.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node scripts/test.mjs && node scripts/test-platform.mjs",
-    "verify:core": "node scripts/verify-core-parity.mjs",
     "sim": "node scripts/run-sim.mjs sim 4 -v",
     "perf": "node scripts/run-sim.mjs perf",
-    "dev": "node scripts/dev.mjs"
+    "dev": "node scripts/dev.mjs",
+    "build:douyin": "node scripts/build-douyin.mjs",
+    "build:douyin:release": "node scripts/build-douyin.mjs --release",
+    "prepare:android": "node scripts/prepare-android.mjs",
+    "build:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android.ps1",
+    "build:android:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android.ps1 -Release",
+    "release:check": "node scripts/check-release.mjs",
+    "test:release": "node scripts/test-release.mjs",
+    "dev:douyin": "node scripts/dev.mjs --canvas-preview"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

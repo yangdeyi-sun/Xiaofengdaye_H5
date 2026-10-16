@@ -55,6 +55,8 @@ export interface FlowerField {
   dist: number;
   level: number;
   stock: number;
+  /** 最近采空时刻，缺省兼容旧存档；恢复等待使用游戏时间。 */
+  depletedAt?: number;
   danger: number;
   discovered: boolean;
   intelExpiresAt: number;

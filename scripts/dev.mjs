@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const built = spawnSync(process.execPath, [path.join(root, 'scripts/build.mjs')], { cwd: root, stdio: 'inherit' });
+const previewArgs = process.argv.includes('--canvas-preview') ? ['--canvas-preview'] : [];
+const built = spawnSync(process.execPath, [path.join(root, 'scripts/build.mjs'), ...previewArgs], { cwd: root, stdio: 'inherit' });
 if (built.status !== 0) process.exit(built.status ?? 1);
 
 const dist = path.join(root, 'dist');

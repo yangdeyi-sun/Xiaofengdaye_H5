@@ -58,3 +58,9 @@ window.addEventListener('beforeunload', () => {
   ui.destroy();
   session.dispose();
 });
+window.addEventListener('xf-native-exit', () => {
+  if (disposed) return;
+  disposed = true;
+  ui.destroy();
+  session.dispose();
+});

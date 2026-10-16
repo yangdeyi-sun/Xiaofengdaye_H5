@@ -1,0 +1,52 @@
+plugins { id 'com.android.application' }
+
+def releaseInfo = new groovy.json.JsonSlurper().parse(rootProject.file('../release.config.json'))
+def signingPath = System.getenv('XF_KEYSTORE_PATH')
+android {
+    namespace 'com.xiaofengdaye.game'
+    compileSdk 36
+    buildFeatures { buildConfig true }
+    defaultConfig {
+        applicationId releaseInfo.applicationId
+        minSdk 26
+        targetSdk 36
+        versionCode releaseInfo.versionCode as int
+        versionName releaseInfo.version
+        resValue 'string', 'app_name', releaseInfo.appName
+    }
+    if (signingPath) {
+        signingConfigs {
+            release {
+                storeFile file(signingPath)
+                storePassword System.getenv('XF_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('XF_KEY_ALIAS')
+                keyPassword System.getenv('XF_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug { applicationIdSuffix '.debug'; versionNameSuffix '-debug' }
+        release {
+            minifyEnabled false
+            if (signingPath) signingConfig signingConfigs.release
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies { implementation 'androidx.webkit:webkit:1.12.1' }
+
+tasks.register('verifyWebEntry') {
+    doLast {
+        def entry = file('src/main/assets/index.html')
+        if (!entry.exists() || !entry.getText('UTF-8').contains('id="app"')) {
+            throw new GradleException('Android requires the original web UI. Run npm run prepare:android first.')
+        }
+        if (!file('src/main/assets/styles.css').exists() || !file('src/main/assets/assets/app.js').exists()) {
+            throw new GradleException('Missing original web UI stylesheet or script.')
+        }
+        if (file('src/main/assets/canvas-preview.html').exists()) {
+            throw new GradleException('Mini game Canvas preview must not be included in Android.')
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn('verifyWebEntry') }

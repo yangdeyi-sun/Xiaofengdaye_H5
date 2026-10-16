@@ -148,6 +148,15 @@ function rewardChecks(): void {
 
 rewardChecks();
 
+// 单实例 Android 进程崩溃后可以接管遗留租约，浏览器多标签隔离仍由前面的检查保障。
+const androidPlatform = Object.create(web) as WebPlatform;
+Object.defineProperty(androidPlatform, 'name', { value: 'android' });
+setPlatform(androidPlatform);
+const restartedAndroidRepo = new BrowserSaveRepository();
+check(restartedAndroidRepo.claimWriter(), 'Android单实例重启可接管旧进程写入租约');
+restartedAndroidRepo.releaseWriter();
+setPlatform(web);
+
 async function placeholderChecks(): Promise<void> {
   const r = await web.ads.showRewarded('offline_double');
   check(r.status === 'completed' && r.detail.startsWith('placeholder'), '未接入广告 SDK 时占位直接发奖');

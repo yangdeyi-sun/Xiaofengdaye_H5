@@ -21,8 +21,8 @@ function ok(cond: boolean, name: string, extra = '') {
 
 // ---------- 配置 ----------
 ok(validateConfig(DEFAULT_CONFIG).length === 0, 'config schema valid', validateConfig(DEFAULT_CONFIG).join(';'));
-ok(DEFAULT_CONFIG.tutorial.length === 7 && DEFAULT_CONFIG.tutorial[6].doneTask === 't_build_storage',
-  'tutorial guides through the first storage cell (7 steps)');
+ok(DEFAULT_CONFIG.tutorial.length === 8 && DEFAULT_CONFIG.tutorial[7].doneTask === 't_first_scout',
+  'tutorial ends with the first scout (8 steps)');
 ok(DEFAULT_CONFIG.economy.overflowDecayPerMin === 0.005, 'overflow decay reduced to 0.5% per minute');
 ok(softExponent(40, 20) < 40 && softExponent(20, 20) === 20, 'segmented soft cap preserves threshold and softens tail');
 
@@ -55,16 +55,15 @@ function runFor(eng: GameEngine, sec: number) {
     eng.step(0.1);
     acc += 0.2;
     if (acc >= 1) { eng.collect('f0', 1); acc -= 1; }
-    if (eng.run.colony.larvae < 1) eng.lay();
-    if (eng.run.colony.larvae > 0) {
-      if (eng.w.count(Bld.ScoutRoom) > 0 && eng.w.role(Role.Scout) === 0) eng.differentiate(Role.Scout, 1);
-      else if (eng.w.count(Bld.ForagerRoom) > 0) eng.differentiate(Role.Forager, 1);
-    }
+    const nextBuilding = [Bld.Brewery, Bld.ForagerRoom, Bld.ScoutRoom, Bld.Storage]
+      .find((type) => eng.w.count(type) === 0 && eng.hive.buildingAvailable(type));
     const free = eng.run.hive.cells.find((c) => c.unlocked && c.building === '');
-    if (free) {
-      if (eng.hive.buildingAvailable(Bld.ScoutRoom) && eng.w.count(Bld.ScoutRoom) === 0) eng.build(free.cellId, Bld.ScoutRoom);
-      else if (eng.hive.buildingAvailable(Bld.ForagerRoom) && eng.w.count(Bld.ForagerRoom) === 0) eng.build(free.cellId, Bld.ForagerRoom);
-      else if (eng.hive.buildingAvailable(Bld.Storage)) eng.build(free.cellId, Bld.Storage);
+    if (nextBuilding && free) eng.build(free.cellId, nextBuilding);
+    const target = eng.w.role(Role.House) === 0 ? Role.House : eng.w.role(Role.Forager) === 0 ? Role.Forager : Role.Scout;
+    const queued = eng.run.colony.batches.some((b) => b.targetRole === target);
+    if (eng.colony.roleAvailable(target) && !queued && !nextBuilding) {
+      if (eng.run.colony.larvae < 1) eng.lay();
+      eng.differentiate(target, 1);
     }
   }
 }
@@ -154,7 +153,9 @@ guardGate.run.colony.larvae = 1;
 guardGate.run.colony.autoHatch = true;
 guardGate.run.res[Res.Honey] = BigNum.of(1000);
 guardGate.step(0.1);
-ok(guardGate.run.colony.batches.some((b) => b.targetRole === Role.Guard), 'first available guard is prioritized');
+ok(guardGate.run.colony.batches.length === 0, 'legacy auto flags cannot differentiate a guard');
+guardGate.differentiate(Role.Guard, 1);
+ok(guardGate.run.colony.batches.some((b) => b.targetRole === Role.Guard), 'player chooses first guard manually');
 guardGate.run.res[Res.Honey] = BigNum.of(1e9);
 ok(guardGate.threats.bearTribute() <= 600, 'bear tribute is capped in first cycle');
 
@@ -282,7 +283,7 @@ ok(gd.inTutorial(), 'guide: new game is in tutorial phase');
 ok(gd.pendingIntro()?.id === 'flowers', 'guide: first intro is flowers', gd.pendingIntro()?.id);
 gd.markSeen('flowers');
 ok(gd.pendingIntro() === null, 'guide: nothing else before first nectar', gd.pendingIntro()?.id);
-ok(gd.hints(2).some((h) => h.id === 'collect'), 'guide: hint suggests collecting');
+ok(gd.hints(2).some((h) => h.id === 'tap'), 'guide: hint suggests collecting');
 g0.collect('f0', 1);
 for (let i = 0; i < 30; i++) { g0.step(0.1); }
 ok(gd.pendingIntro()?.id === 'honey', 'guide: honey intro after first nectar', gd.pendingIntro()?.id);
@@ -304,23 +305,88 @@ if (legacyState !== null) {
   ok(first === null || !['flowers', 'honey', 'queen', 'scout'].includes(first.id), 'guide: legacy save skips old intros', first?.id);
 }
 
-// ---------- 0.3 新手节奏：自动繁育为第一个储蜜格留蜂蜜 ----------
+// ---------- 主动繁育、花源瓶颈与引导交接 ----------
 {
-  const st = createInitialState(DEFAULT_CONFIG, 'reserve-test', 1000, 11);
-  const eng = new GameEngine(DEFAULT_CONFIG, st);
-  ['t_first_nectar', 't_first_egg', 't_build_scout', 't_first_scout', 't_first_dance', 't_build_forager', 't_first_forager',
-    't_auto_loop'].forEach((id) => st.run.tasksDone.push(id));
-  eng.setAuto(true, true);
-  // 5 只守卫蜂：高于紧急补员线，且不会带回花蜜，便于观察蜂蜜是否被产卵花掉
-  st.run.colony.roles[Role.Guard] = 5;
-  st.run.res[Res.Honey] = BigNum.of(150);
-  st.run.res[Res.Nectar] = BigNum.zero(); // 没有花蜜可酿，蜂蜜保持在储蜜格价格以下
-  const eggsBefore = st.run.colony.eggsLaid;
-  for (let i = 0; i < 300; i++) eng.step(0.1);
-  ok(st.run.colony.eggsLaid === eggsBefore, 'pacing: auto-lay saves honey for the first storage cell');
-  st.run.res[Res.Honey] = BigNum.of(390);
-  for (let i = 0; i < 300; i++) eng.step(0.1);
-  ok(st.run.colony.eggsLaid > eggsBefore, 'pacing: auto-lay resumes above the storage reserve');
+  const manual = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'manual', 0, 11));
+  const cell = manual.run.hive.cells.find((c) => c.unlocked && c.building === '')!;
+  cell.building = Bld.ForagerRoom;
+  manual.run.tasksDone.push('t_first_forager'); // 低人口紧急状态也不能自行繁育
+  manual.run.res[Res.Honey] = BigNum.of(390);
+  manual.run.colony.larvae = 1;
+  manual.setAuto(true, true);
+  manual.run.colony.autoLay = true; manual.run.colony.autoHatch = true;
+  for (let i = 0; i < 300; i++) manual.step(0.1);
+  ok(manual.run.colony.eggsLaid === 0 && manual.run.colony.batches.length === 0,
+    'manual breeding: auto switches and emergency state do not spend honey');
+  const cost0 = manual.colony.eggCost()[0].amount.toNumber();
+  ok(manual.lay().ok, 'manual egg hatching succeeds');
+  const cost1 = manual.colony.eggCost()[0].amount.toNumber();
+  ok(cost1 >= cost0 + 1 && Number.isInteger(cost1), 'next egg has a visibly higher integer cost before any adult is born');
+  manual.run.colony.roles[Role.Forager] = 9;
+  ok(manual.colony.eggCost()[0].amount.toNumber() === cost1, 'egg cost depends on cumulative eggs, not adult population');
+  manual.run.colony.roles[Role.Forager] = 0;
+  manual.differentiate(Role.Forager, 1);
+  manual.settleOffline(120, 'manual-offline', '');
+  ok(manual.run.colony.eggsLaid === 1 && manual.w.role(Role.Forager) === 1,
+    'offline finishes a manually started batch without breeding additional bees');
+  const savedManual = decodeEnvelope(encodeEnvelope(manual.state, DEFAULT_CONFIG.configVersion, 1)).state!;
+  ok(!savedManual.run.colony.autoLay && !savedManual.run.colony.autoHatch, 'save restores manual breeding');
+
+  const flowers = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'flowers', 0, 12));
+  const field = flowers.run.map.fields[0];
+  const initialStock = field.stock;
+  flowers.collect(field.fieldId, 1000);
+  ok(field.stock === 0 && flowers.w.econ.num(Res.Nectar) <= initialStock + 1e-6,
+    'manual harvest is bounded by actual flower stock');
+  const nectar = flowers.w.econ.num(Res.Nectar);
+  ok(!flowers.collect(field.fieldId, 1).ok && flowers.w.econ.num(Res.Nectar) === nectar,
+    'empty flowers cannot create nectar');
+  const remaining = flowers.map.recoveryRemaining(field);
+  for (let i = 0; i < 100; i++) flowers.step(0.1);
+  ok(field.stock === 0 && flowers.map.recoveryRemaining(field) < remaining,
+    'empty flowers wait through a visible recovery interval');
+  const decoded = decodeEnvelope(encodeEnvelope(flowers.state, DEFAULT_CONFIG.configVersion, 1)).state!;
+  const restored = new GameEngine(DEFAULT_CONFIG, decoded);
+  ok(Math.abs(restored.map.recoveryRemaining(restored.run.map.fields[0]) - flowers.map.recoveryRemaining(field)) < 1e-6,
+    'flower countdown persists through reload');
+  const scoutCell = flowers.run.hive.cells.find((c) => c.unlocked && c.building === '')!;
+  scoutCell.building = Bld.ScoutRoom;
+  flowers.run.res[Res.Honey] = BigNum.of(390);
+  const oldMax = flowers.map.maxStock(field);
+  ok(flowers.upgrade('scout.stock').ok && flowers.map.maxStock(field) > oldMax, 'scout upgrade increases flower stock');
+  const oldWait = flowers.map.recoveryRemaining(field);
+  ok(flowers.upgrade('scout.regrowth').ok && flowers.map.recoveryRemaining(field) < oldWait,
+    'scout upgrade shortens an active flower recovery countdown');
+  for (let i = 0; i < 100; i++) flowers.step(0.1);
+  ok(field.stock > 0, 'flowers reopen after recovery');
+
+  const chain = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'chain', 0, 15));
+  const baseCapacity = chain.prod.baseConvertCapacity() + chain.prod.brewCapacity();
+  ok(!chain.hive.buildingAvailable(Bld.ForagerRoom) && !chain.hive.buildingAvailable(Bld.ScoutRoom),
+    'collecting and scouting rooms are initially gated');
+  runFor(chain, 900);
+  ok(chain.w.count(Bld.Brewery) > 0 && chain.prod.baseConvertCapacity() + chain.prod.brewCapacity() > baseCapacity * 3,
+    'brewery materially improves conversion immediately');
+  ok(chain.run.stats.firstForagerAt >= 0 && chain.run.stats.firstScoutAt > chain.run.stats.firstForagerAt,
+    'full opening reaches forager before scout');
+  ok(chain.state.meta.tutorialDone && chain.w.count(Bld.Storage) > 0,
+    'tutorial and subsequent storage unlock work without automatic breeding');
+  const guide = new Guide(chain);
+  ok(guide.pendingIntro()?.id === 'handover', 'handover popup takes priority at tutorial completion');
+  guide.markSeen('handover');
+  ok(guide.pendingIntro()?.id !== 'handover', 'handover is shown only once');
+  const legacyGuide = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'legacy-guide', 0, 16));
+  legacyGuide.state.meta.tutorialStep = 6; // 旧版“储蜜格”步骤
+  legacyGuide.run.tasksDone.push('t_first_nectar');
+  legacyGuide.prog.tutorialTick();
+  ok(legacyGuide.state.meta.tutorialStep === 1 && !legacyGuide.state.meta.tutorialDone,
+    'old tutorial step is recalculated from actual tasks');
+  legacyGuide.run.hive.cells.find((c) => c.unlocked && c.building === '')!.building = Bld.ScoutRoom;
+  legacyGuide.run.colony.roles[Role.Scout] = 1;
+  legacyGuide.prog.tutorialTick();
+  ok(legacyGuide.state.meta.tutorialDone && legacyGuide.w.count(Bld.Storage) === 0,
+    'first completed scout ends tutorial before storage is built');
+  console.log(`Opening: brewery built, forager ${chain.run.stats.firstForagerAt.toFixed(1)}s, scout ${chain.run.stats.firstScoutAt.toFixed(1)}s`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

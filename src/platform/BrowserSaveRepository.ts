@@ -41,7 +41,8 @@ export class BrowserSaveRepository {
       const raw = this.store.get(this.key('writer'));
       if (raw !== null) {
         const current = JSON.parse(raw) as WriterRecord;
-        if (current.id !== this.ownerId && now - current.updatedAt < WRITER_TTL_MS) return false;
+        // Android 壳为 singleTask，崩溃重启可接管进程遗留租约；浏览器仍防止多标签页同时写入。
+        if (current.id !== this.ownerId && now - current.updatedAt < WRITER_TTL_MS && platform().name !== 'android') return false;
       }
       const next: WriterRecord = { id: this.ownerId, updatedAt: now };
       this.store.set(this.key('writer'), JSON.stringify(next));

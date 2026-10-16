@@ -6,7 +6,6 @@ import { CmdResult, CostAmount, World } from './World';
 /** 蜂后、幼虫队列与工种（BEE-001/002/005/008，ECO-008） */
 export class ColonyService {
   private w: World;
-  private layRequested: boolean = false;
   private injuryAcc: Record<string, number> = {};
 
   constructor(w: World) {
@@ -20,8 +19,13 @@ export class ColonyService {
 
   eggCost(): CostAmount[] {
     const e = this.w.cfg.economy;
-    const mul = this.emergency() ? 0.5 : 1;
-    return this.w.econ.costOf([e.eggCost], this.w.adults(), mul, 40);
+    const costs = this.w.econ.costOf([e.eggCost], this.w.s.run.colony.eggsLaid, 1, 40);
+    // 新卵按整数蜂蜜收费，让每次增长在界面和实际扣费中一致可见。
+    costs.forEach((cost) => {
+      const amount = cost.amount.toNumber();
+      if (Number.isFinite(amount)) cost.amount = BigNum.of(Math.ceil(amount - 1e-9));
+    });
+    return costs;
   }
 
   roleCost(role: string): CostAmount[] {
@@ -182,65 +186,16 @@ export class ColonyService {
     }
   }
 
-  setAuto(lay: boolean, hatch: boolean): void {
-    this.w.s.run.colony.autoLay = lay;
-    this.w.s.run.colony.autoHatch = hatch;
+  /** 保留旧命令兼容存档/调用方；繁育只能手动发起。 */
+  setAuto(_lay: boolean, _hatch: boolean): void {
+    this.w.s.run.colony.autoLay = false;
+    this.w.s.run.colony.autoHatch = false;
   }
 
-  setRatio(role: string, v: number): void {
-    this.w.s.run.colony.autoRatio[role] = Math.max(0, Math.min(20, Math.round(v)));
-  }
+  setRatio(_role: string, _v: number): void {}
 
   setWaxShare(v: number): void {
     this.w.s.run.colony.houseWaxShare = Math.max(0, Math.min(1, v));
-  }
-
-  /** 选择最缺的工种（按玩家设置的比例） */
-  private pickAutoRole(): string {
-    const c = this.w.s.run.colony;
-    // 守卫巢房建成后先补第一只守卫，避免按常规配比排队太久，
-    // 也保证敌害开放时玩家已经拥有实际防守能力。
-    if (this.roleAvailable(Role.Guard) && this.w.role(Role.Guard) <= 0 &&
-      !c.batches.some((b: LarvaBatch) => b.targetRole === Role.Guard)) {
-      return Role.Guard;
-    }
-    let best = '';
-    let bestDeficit = -1e9;
-    let totalW = 0;
-    ALL_ROLES.forEach((r: string) => {
-      if (this.roleAvailable(r)) {
-        totalW += c.autoRatio[r] === undefined ? 0 : c.autoRatio[r];
-      }
-    });
-    if (totalW <= 0) {
-      return '';
-    }
-    let adults = 0;
-    ALL_ROLES.forEach((r: string) => {
-      adults += this.w.role(r);
-    });
-    adults += this.w.inHatch() + 1;
-    ALL_ROLES.forEach((r: string) => {
-      if (!this.roleAvailable(r)) {
-        return;
-      }
-      const wgt = c.autoRatio[r] === undefined ? 0 : c.autoRatio[r];
-      if (wgt <= 0) {
-        return;
-      }
-      let have = this.w.role(r);
-      c.batches.forEach((b: LarvaBatch) => {
-        if (b.targetRole === r) {
-          have += b.count;
-        }
-      });
-      const deficit = wgt / totalW * adults - have;
-      if (deficit > bestDeficit) {
-        bestDeficit = deficit;
-        best = r;
-      }
-    });
-    return best;
   }
 
   tick(dt: number): void {
@@ -249,29 +204,9 @@ export class ColonyService {
     if (c.layCooldown > 0) {
       c.layCooldown = Math.max(0, c.layCooldown - dt);
     }
-    // 自动产卵 / 紧急补员
-    const emergency = this.emergency();
-    if ((c.autoLay || emergency) && c.layCooldown <= 0) {
-      const keep = emergency ? BigNum.zero() : this.reserveHoney();
-      const cost = this.eggCost();
-      if (this.w.population() < this.w.popCap() && c.larvae < Math.max(2, this.hatchSlots()) &&
-        this.w.econ.amount(Res.Honey).gte(cost[0].amount.add(keep))) {
-        this.doLay(true);
-      }
-    }
-    // 自动分化
-    if ((c.autoHatch || emergency) && c.larvae > 0) {
-      const waiting = c.batches.filter((b: LarvaBatch) => !b.started).length;
-      if (waiting === 0) {
-        const role = emergency && this.roleAvailable(Role.Forager) ? Role.Forager : this.pickAutoRole();
-        if (role.length > 0) {
-          const cost = this.roleCost(role);
-          if (this.w.econ.amount(Res.Honey).gte(cost[0].amount.add(emergency ? BigNum.zero() : this.reserveHoney()))) {
-            this.differentiate(role, 1);
-          }
-        }
-      }
-    }
+    // 旧存档的自动繁育开关也不会触发产卵或分化。
+    c.autoLay = false;
+    c.autoHatch = false;
     // 孵化推进
     let finished = false;
     for (let i = c.batches.length - 1; i >= 0; i--) {
@@ -294,24 +229,6 @@ export class ColonyService {
     }
     this.recoverInjured(dt);
     this.lifespanTick(dt);
-  }
-
-  /** 自动产卵保留的越冬/建设蜂蜜：冬季将至时保留更多 */
-  private reserveHoney(): BigNum {
-    const s = this.w.s.run.season.season;
-    const adults = this.w.adults();
-    // 新手期：蜂巢开始自行运转后、第一个储蜜格建成前，自动繁育要给储蜜格留出蜂蜜，
-    // 否则产卵和培养会把蜂蜜花光，玩家怎么点都攒不够建储蜜格的钱
-    if (this.w.unlocked('t_auto_loop') && this.w.count(Bld.Storage) === 0) {
-      const cost = this.w.econ.costOf(this.w.bldDef(Bld.Storage).costs, 0, 1, 4);
-      if (cost.length > 0) {
-        return cost[0].amount;
-      }
-    }
-    if (s === 'winterPrep' || s === 'winter') {
-      return BigNum.of(adults * 3);
-    }
-    return BigNum.of(Math.min(50, adults));
   }
 
   /** 受伤蜜蜂恢复（ECO-006：普通威胁优先造成受伤而非死亡） */
@@ -344,7 +261,7 @@ export class ColonyService {
     return add;
   }
 
-  /** 生态模式寿命（BEE-008）：默认关闭；开启时按工作周期老化，由自动补员接替 */
+  /** 生态模式寿命：默认关闭；开启时按工作周期老化，需玩家手动补员 */
   private lifespanTick(dt: number): void {
     if (!this.w.s.meta.settings.ecoMode || this.w.offline) {
       return;
@@ -378,7 +295,7 @@ export class ColonyService {
       return false;
     }
     const deathRate = this.w.adults() / this.w.cfg.economy.lifespan;
-    const layRate = this.w.s.run.colony.autoLay ? 1 / this.layInterval() : 0;
+    const layRate = 0;
     return deathRate > layRate;
   }
 }

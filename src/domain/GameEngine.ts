@@ -49,6 +49,8 @@ export class GameEngine {
   private seasonLog: string[] = [];
 
   constructor(cfg: GameConfigDef, state: GameState) {
+    state.run.colony.autoLay = false;
+    state.run.colony.autoHatch = false;
     this.w = new World(cfg, state);
     this.hive = new HiveService(this.w);
     this.colony = new ColonyService(this.w);
@@ -156,12 +158,11 @@ export class GameEngine {
       if (run.stats.firstForagerAt < 0) {
         run.stats.firstForagerAt = run.time;
       }
-      // 自动化转折：蜂后自动产卵、幼虫自动分化
-      this.colony.setAuto(true, true);
+
     }
     if (id === 't_auto_loop' && run.stats.autoLoopAt < 0) {
       run.stats.autoLoopAt = run.time;
-      this.w.msg('milestone', '蜂巢开始自行运转！离线时蜂群也会继续工作。');
+      this.w.msg('milestone', '采酿产线接通！采集和酿蜜会持续工作，孵化与分化由你决定。');
       this.w.emit('milestone', 0, 0, '蜂巢开始自行运转', 'any');
     }
     if (id === 't_build_storage' && run.stats.firstStorageAt < 0) {

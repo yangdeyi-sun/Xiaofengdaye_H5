@@ -2,6 +2,9 @@ import type {
   AdBackend, AudioBackend, DrawableImage, ImageLoader, KeyValueStore, Platform, RewardedResult, SoundHandle
 } from '../Platform';
 import { NativeBridgeAds, detectNativeBridge } from './NativeBridgeAds';
+import { UnavailableAds } from '../UnavailableAds';
+
+declare const __PRODUCTION__: boolean;
 
 /** 浏览器 localStorage。每次调用时才读取全局对象，便于测试注入内存实现。 */
 class WebStorage implements KeyValueStore {
@@ -159,7 +162,7 @@ class WebMockAds implements AdBackend {
 }
 
 export class WebPlatform implements Platform {
-  readonly name = 'web';
+  readonly name: string;
   readonly storage = new WebStorage();
   readonly audio = new WebAudio();
   readonly images: ImageLoader;
@@ -171,11 +174,14 @@ export class WebPlatform implements Platform {
    *            网址带 ?ads=mock / ?ads=none 时用测试广告，否则用占位广告（直接跳过并发奖）
    */
   constructor(assetBase = './', ads?: AdBackend) {
+    this.name = typeof navigator !== 'undefined' && navigator.userAgent.includes('XiaofengdayeAndroid') ? 'android' : 'web';
     this.images = new WebImages(assetBase);
     const bridge = detectNativeBridge();
     let mode = '';
     try { mode = new URLSearchParams(location.search).get('ads') ?? ''; } catch { /* 非浏览器环境 */ }
+    const production = typeof __PRODUCTION__ !== 'undefined' && __PRODUCTION__;
     this.ads = ads ?? (bridge !== null ? new NativeBridgeAds(bridge)
+      : production ? new UnavailableAds()
       : (mode === 'mock' || mode === 'none' ? new WebMockAds() : new PlaceholderAds()));
   }
 

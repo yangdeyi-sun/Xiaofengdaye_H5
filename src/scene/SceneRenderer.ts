@@ -1122,7 +1122,7 @@ export class SceneRenderer {
         ctx.fillText(`${fd.name} · ${f.level}级`, f.x, by + 14 * k);
         ctx.fillStyle = '#806847';
         ctx.font = font(10 * k, false);
-        ctx.fillText(`产出 ×${fd.yieldMul}  ·  存量 ${Math.floor(f.stock)}`, f.x, by + 31 * k);
+        ctx.fillText(eng.map.recoveryRemaining(f) > 0 ? `恢复中 · ${Math.ceil(eng.map.recoveryRemaining(f))}秒` : `产出 ×${fd.yieldMul}  ·  存量 ${Math.floor(f.stock)}`, f.x, by + 31 * k);
         ctx.fillStyle = 'rgba(255,244,218,0.96)';
         ctx.beginPath();
         ctx.moveTo(f.x - 7 * k, by + bubbleH);

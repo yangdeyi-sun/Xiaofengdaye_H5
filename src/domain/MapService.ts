@@ -23,7 +23,7 @@ export class MapService {
   }
 
   maxStock(f: FlowerField): number {
-    return this.w.flower(f.flower).maxStock * (1 + 0.15 * (f.level - this.w.flower(f.flower).tier));
+    return this.w.flower(f.flower).maxStock * this.w.attrs.get('scout.stock') * (1 + 0.15 * (f.level - this.w.flower(f.flower).tier));
   }
 
   /** 侦察信息有效（MAP-003：过期花田不会被自动选为目标） */
@@ -42,18 +42,21 @@ export class MapService {
       return CmdResult.fail('MAP_UNKNOWN', '还不知道这片花田的位置');
     }
     const fd = this.w.flower(f.flower);
-    let gain = 0;
-    for (let i = 0; i < times; i++) {
-      const y = this.w.attrs.get('manual.yield') * fd.yieldMul;
-      if (f.stock >= 1) {
-        f.stock = Math.max(0, f.stock - y * 0.5);
-        gain += y * Math.max(0.15, this.w.seasonDef().nectarMul);
-      } else {
-        gain += y * 0.3;
-      }
+    if (f.stock <= 1e-6) {
+      return CmdResult.fail('MAP_RECOVERING', `花丛正在恢复，约${Math.ceil(this.recoveryRemaining(f))}秒后重新开放`);
     }
+    let gain = 0;
+    let collected = 0;
+    for (let i = 0; i < Math.max(0, Math.floor(times)); i++) {
+      const take = Math.min(f.stock, this.w.attrs.get('manual.yield'));
+      if (take <= 1e-6) break;
+      f.stock = Math.max(0, f.stock - take);
+      gain += take * fd.yieldMul * Math.max(0.15, this.w.seasonDef().nectarMul);
+      collected++;
+    }
+    this.markDepleted(f);
     const got = this.w.econ.addN(Res.Nectar, gain, Reason.Manual, fieldId);
-    this.w.s.run.stats.manualCollects += times;
+    this.w.s.run.stats.manualCollects += collected;
     this.w.rates.manualIn += gain;
     if (this.w.s.run.stats.firstNectarAt < 0) {
       this.w.s.run.stats.firstNectarAt = this.w.s.run.time;
@@ -321,7 +324,7 @@ export class MapService {
   private allocate(): void {
     const carry = this.w.attrs.get('forager.carry');
     const avail = Math.max(0, this.w.active(Role.Forager) - this.pollinatorTotal());
-    const fields = this.knownFields().filter((f: FlowerField) => f.stock > 1 || this.regen(f) > 0.05);
+    const fields = this.knownFields().filter((f: FlowerField) => (f.stock > 1 || this.regen(f) > 0.05) && this.recoveryRemaining(f) <= 0);
     const strategy = this.w.s.run.colony.forageStrategy;
     const out: ForageAlloc[] = [];
     const caps: number[] = [];
@@ -361,13 +364,25 @@ export class MapService {
     this.w.forageIdle = Math.max(0, remaining);
   }
 
+  recoveryRemaining(f: FlowerField): number {
+    if (f.depletedAt === undefined || f.stock > 1e-6) return 0;
+    return Math.max(0, f.depletedAt + 18 / this.w.attrs.get('scout.regrowth') - this.w.s.run.time);
+  }
+
+  private markDepleted(f: FlowerField): void {
+    if (f.stock <= 1e-6) {
+      f.stock = 0;
+      f.depletedAt = this.w.s.run.time;
+    }
+  }
+
   regen(f: FlowerField): number {
     const fd = this.w.flower(f.flower);
     const region = this.w.region();
     const season = this.w.seasonDef().nectarMul;
     const poll = this.w.s.run.colony.pollinators[f.fieldId];
     const pollBonus = 1 + Math.min(0.8, 0.08 * (poll === undefined ? 0 : poll));
-    return fd.regen * region.regenMul * season * pollBonus * (1 + 0.15 * (f.level - fd.tier));
+    return fd.regen * this.w.attrs.get('scout.regrowth') * region.regenMul * season * pollBonus * (1 + 0.15 * (f.level - fd.tier));
   }
 
   private foragingTick(dt: number): void {
@@ -393,10 +408,11 @@ export class MapService {
       const want = a.bees * carry / a.tripTime * dt;
       const take = Math.min(want, f.stock);
       f.stock -= take;
+      if (take > 0) this.markDepleted(f);
       const nectar = take * fd.yieldMul * Math.max(0.05, season) * region.nectarMul;
       totalNectar += nectar;
       a.rate = dt > 0 ? nectar / dt : 0;
-      jelly += a.bees / a.tripTime * dt * fd.jellyPerTrip;
+      jelly += take / carry * fd.jellyPerTrip;
       injuries += a.bees / a.tripTime * dt * f.danger * 0.012 * (1 - avoid);
     });
     if (totalNectar > 0) {
@@ -423,6 +439,11 @@ export class MapService {
   private regenTick(dt: number): void {
     this.w.s.run.map.fields.forEach((f: FlowerField) => {
       const max = this.maxStock(f);
+      f.stock = Math.min(f.stock, max);
+      if (f.stock <= 1e-6 && f.depletedAt !== undefined) {
+        if (this.recoveryRemaining(f) <= 0) f.stock = max;
+        return;
+      }
       if (f.stock < max) {
         f.stock = Math.min(max, f.stock + this.regen(f) * dt);
       }

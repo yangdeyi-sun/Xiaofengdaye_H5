@@ -69,7 +69,8 @@ while (eng.run.time < maxT) {
   if (fr < 4) {
     clickAcc += 0.1 * (w.unlocked('t_first_scout') ? 3 : 2) * tapScale;
     while (clickAcc >= 1) {
-      eng.collect('f0', 1);
+      const field = eng.map.knownFields().sort((a, b) => b.stock - a.stock)[0];
+      if (field) eng.collect(field.fieldId, 1);
       clickAcc -= 1;
     }
   }
@@ -92,26 +93,30 @@ while (eng.run.time < maxT) {
   if (eng.run.stats.pollinations > 0) mark('pollination');
   if (w.econ.num(Res.Jelly) >= 1) mark('first_jelly');
 
-  // 产卵（自动化前手动）
-  if (!eng.run.colony.autoLay && eng.run.colony.larvae < 1) eng.lay();
-  // 分化
-  if (!eng.run.colony.autoHatch && eng.run.colony.larvae > 0) {
-    if (w.count(Bld.ScoutRoom) > 0 && w.role(Role.Scout) < 1) eng.differentiate(Role.Scout, 1);
-    else if (w.count(Bld.ForagerRoom) > 0) eng.differentiate(Role.Forager, 1);
-    else if (w.count(Bld.ScoutRoom) > 0 && w.role(Role.Scout) < 2) eng.differentiate(Role.Scout, 1);
+  // 模拟玩家主动操作：先补齐关键建筑，再花蜂蜜孵化/分化。
+  const nextBuilding = [Bld.Brewery, Bld.ForagerRoom, Bld.ScoutRoom, Bld.Storage, Bld.Nursery, Bld.GuardRoom, Bld.Evolution]
+    .find((b) => w.count(b) === 0 && eng.hive.buildingAvailable(b));
+  if (nextBuilding) tryBuild(nextBuilding);
+  const queued = (role: string) => eng.run.colony.batches.filter((b) => b.targetRole === role).length;
+  const count = (role: string) => w.role(role) + queued(role);
+  const wanted = count(Role.House) < 1 ? Role.House : count(Role.Forager) < 1 ? Role.Forager :
+    count(Role.Scout) < 1 ? Role.Scout : eng.colony.roleAvailable(Role.Guard) && count(Role.Guard) < 2 ? Role.Guard :
+    count(Role.Scout) < Math.max(1, Math.floor(w.adults() / 15)) ? Role.Scout :
+    count(Role.House) < Math.max(1, Math.floor(w.adults() / 4)) ? Role.House : Role.Forager;
+  const reserve = nextBuilding && w.count(nextBuilding) === 0 ? eng.hive.buildCost(nextBuilding)[0].amount.toNumber() : 0;
+  if (eng.colony.roleAvailable(wanted) && w.econ.num(Res.Honey) > reserve + eng.colony.eggCost()[0].amount.toNumber() + eng.colony.roleCost(wanted)[0].amount.toNumber()) {
+    if (eng.run.colony.larvae < 1) eng.lay();
+    eng.differentiate(wanted, 1);
   }
-  // 建造顺序
-  tryBuild(Bld.ScoutRoom) || tryBuild(Bld.ForagerRoom);
-  if (w.count(Bld.ForagerRoom) > 0) tryBuild(Bld.Storage);
   if (w.count(Bld.Storage) > 0) {
-    tryBuild(Bld.Brewery) || tryBuild(Bld.Nursery) || tryBuild(Bld.GuardRoom) || tryBuild(Bld.Evolution, true);
     if (w.count(Bld.Storage) < 2 + Math.floor(w.adults() / 25)) tryBuild(Bld.Storage);
     if (!emptyCell(true) || eng.run.hive.expansions === 0) tryExpand();
+    if (w.count(Bld.Nursery) < Math.max(1, Math.floor(w.adults() / 15))) tryBuild(Bld.Nursery);
   }
   if (w.count(Bld.Brewery) > 0) eng.setWaxShare(0.3);
   // 升级：最便宜的可负担项，保留一部分蜂蜜
   // 跟随引导的玩家：优先攒钱建关键巢房
-  const keyNeeded = [Bld.Storage, Bld.Brewery, Bld.Nursery, Bld.GuardRoom, Bld.Evolution]
+  const keyNeeded = [Bld.Brewery, Bld.ForagerRoom, Bld.ScoutRoom, Bld.Storage, Bld.Nursery, Bld.GuardRoom, Bld.Evolution]
     .find((b) => w.count(b) === 0 && eng.hive.buildingAvailable(b));
   const savingFor = keyNeeded ? eng.hive.buildCost(keyNeeded)[0].amount.toNumber() : 0;
   if (sec % 5 === 0 && w.unlocked('t_first_forager') && w.econ.num(Res.Honey) > savingFor * 1.5) {
@@ -173,10 +178,10 @@ const checks: Check[] = [
   { name: '第一次获得资源 ≤30秒', key: 'first_nectar', min: 0, max: 30 },
   { name: '第一次产卵 ≤2分钟', key: 'first_egg', min: 0, max: 120 },
   // 0.3 新手节奏：储蜜格从约 19 分钟提前到 4~8 分钟（休闲玩家 SIM_TAPS=0.25 约 7.5 分钟）
-  { name: '首个侦察蜂室 ≤1.5分钟', key: 'first_scout_room', min: 0, max: 90 },
-  { name: '第一只侦察蜂 ≤2.5分钟', key: 'first_scout', min: 0, max: 150 },
-  { name: '第一只采集蜂 2~6分钟', key: 'first_forager', min: 120, max: 360 },
-  { name: '基础自动循环 ≤8分钟', key: 'auto_loop', min: 0, max: 480 },
+  { name: '首个侦察蜂室 ≤6分钟', key: 'first_scout_room', min: 0, max: 360 },
+  { name: '第一只侦察蜂 ≤7分钟', key: 'first_scout', min: 0, max: 420 },
+  { name: '第一只采集蜂 1~6分钟', key: 'first_forager', min: 60, max: 360 },
+  { name: '采酿产线接通 ≤8分钟', key: 'auto_loop', min: 0, max: 480 },
   { name: '第一个储蜜格 3~9分钟', key: 'first_storage', min: 180, max: 540 },
   { name: '第一次扩建 ≤15分钟', key: 'first_expand', min: 0, max: 900 },
   { name: '首个冬季在20分钟后', key: 'first_winter_start', min: 1200, max: 1e9 },

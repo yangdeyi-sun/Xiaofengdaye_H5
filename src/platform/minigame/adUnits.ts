@@ -13,6 +13,8 @@ export interface AdUnitConfig {
   interstitial: string;
 }
 
+declare const __DOUYIN_REWARDED_ID__: string;
+declare const __DOUYIN_INTERSTITIAL_ID__: string;
 export const DOUYIN_AD_UNITS: AdUnitConfig = {
   rewarded: {
     offline_double: '',
@@ -22,8 +24,8 @@ export const DOUYIN_AD_UNITS: AdUnitConfig = {
     colony_revive: '',
     swarm_bonus: ''
   },
-  rewardedDefault: '',
-  interstitial: ''
+  rewardedDefault: typeof __DOUYIN_REWARDED_ID__ !== 'undefined' ? __DOUYIN_REWARDED_ID__ : '',
+  interstitial: typeof __DOUYIN_INTERSTITIAL_ID__ !== 'undefined' ? __DOUYIN_INTERSTITIAL_ID__ : ''
 };
 
 export const TAPTAP_AD_UNITS: AdUnitConfig = {

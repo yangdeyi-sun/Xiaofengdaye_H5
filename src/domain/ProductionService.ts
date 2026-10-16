@@ -34,7 +34,7 @@ export class ProductionService {
   brewCapacity(): number {
     const e = this.w.cfg.economy;
     const split = this.houseSplit();
-    return split[0] * e.houseBrewRate * this.w.attrs.get('house.brewSpeed') * this.w.attrs.get('house.batch') *
+    return (this.w.count(Bld.Brewery) * 2 + split[0]) * e.houseBrewRate * this.w.attrs.get('house.brewSpeed') * this.w.attrs.get('house.batch') *
       this.w.seasonDef().brewMul;
   }
 

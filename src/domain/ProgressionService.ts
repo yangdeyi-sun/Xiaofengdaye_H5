@@ -94,7 +94,7 @@ export class ProgressionService {
       case 't_first_forager':
         return w.role(Role.Forager) > 0;
       case 't_auto_loop':
-        return w.role(Role.Forager) > 0 && run.stats.deliveredNectar >= 15 && run.colony.autoLay && run.colony.autoHatch;
+        return w.role(Role.Forager) > 0 && run.stats.deliveredNectar >= 15;
       case 't_build_storage':
         return w.count(Bld.Storage) > 0;
       case 't_first_expand':
@@ -484,11 +484,15 @@ export class ProgressionService {
       return;
     }
     const steps = this.w.cfg.tutorial;
+    // 从实际完成任务重算，兼容旧版本步骤顺序。
+    meta.tutorialStep = 0;
     while (meta.tutorialStep < steps.length && this.w.unlocked(steps[meta.tutorialStep].doneTask)) {
       meta.tutorialStep += 1;
     }
-    if (meta.tutorialStep >= steps.length) {
+    if (this.w.count(Bld.ScoutRoom) > 0 && this.w.role(Role.Scout) > 0) {
+      meta.tutorialStep = steps.length;
       meta.tutorialDone = true;
+      this.w.msg('milestone', '接下来，这个蜜蜂王国就交由你把握它的发展了！');
     }
   }
 

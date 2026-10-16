@@ -15,8 +15,10 @@ export const ECO_NOTES: EcoNote[] = [
   { id: 'balance', title: '生态风险需要提前管理', fact: '胡蜂、蜡螟等生物也是生态关系的一部分。健康蜂群依靠巢群状态、环境和防卫能力降低损失。', gameLink: '游戏对应：首只守卫蜂孵化后才开放敌害，风险会先预警再逐步造成影响。', unlockTask: 't_first_clear' }
 ];
 
-export const LEGAL_ENTITY = '小峰大业开发者';
-export const CONTACT_EMAIL = 'xiaofengdaye.support@example.com';
+declare const __PUBLISHER__: string;
+declare const __SUPPORT_EMAIL__: string;
+export const LEGAL_ENTITY = typeof __PUBLISHER__ !== 'undefined' && __PUBLISHER__ ? __PUBLISHER__ : '小峰大业开发者';
+export const CONTACT_EMAIL = typeof __SUPPORT_EMAIL__ !== 'undefined' && __SUPPORT_EMAIL__ ? __SUPPORT_EMAIL__ : 'xiaofengdaye.support@example.com';
 export const POLICY_DATE = '2026年10月16日';
 
 export const PRIVACY_SUMMARY = [
@@ -60,10 +62,10 @@ export const AGREEMENT_FULL = [
 ];
 
 export const HELP_TEXT = [
-  '采集：点击花朵获得花蜜；解锁侦察蜂后可以按住花朵连续采集。蜂巢会把花蜜转化为蜂蜜。',
-  '繁育：蜂后消耗蜂蜜产下幼虫，幼虫消耗蜂蜜培养为侦察蜂、采集蜂、巢内工蜂或守卫蜂。',
+  '采集：点击花朵获得花蜜；解锁侦察蜂后可以按住花朵连续采集。花丛花蜜有限，采空后需要等待重新开花；侦察房升级能增加储量和缩短等待。蜂巢会把花蜜转化为蜂蜜。',
+  '繁育：点击蜂后页的“孵化新卵”获得幼虫，再选择工种分化。每枚新卵的蜂蜜费用随累计孵化数量递增，繁育需要亲自决定。',
   '侦察与摇摆舞：侦察蜂发现花田后回巢跳舞，花田才会被标记。侦察信息会随时间和季节过期。',
-  '自动化：有了采集蜂后，蜂后自动产卵、幼虫自动培养，蜂巢开始自行运转，离线时也会工作。',
+  '发展：先建酿蜜房改善转换，再补采集蜂巢房，最后用侦察蜂补足花源。首只侦察蜂完成后自由发展。采集、酿蜜和已开始的分化离线仍会继续，不会自动繁育。',
   '蜂巢：在六边形格子上建造巢房。相邻摆放有加成：育婴房靠近蜂后室、酿蜜房靠近储蜜格、储蜜格彼此相邻、守卫巢房放在最外圈、进化腔靠近中心。',
   '四季：建成储蜜格后开启四季。冬季花田几乎停产，蜂群依靠储蜜过冬。首个冬季只会降低产量。',
   '敌害：胡蜂、蜘蛛网和蜡螟会让蜜蜂受伤或降低效率；熊来袭时可以防守、交付蜂蜜或稍后处理。离线期间不会毁巢。',

@@ -65,6 +65,8 @@ const STATS: StatDef[] = [
   st('scout.speed', '侦察飞行速度', 40, 5, 500, '距离/秒'),
   st('scout.discovery', '发现效率', 1, 0.1, 20, '倍'),
   st('scout.range', '侦察范围', 420, 100, 5000, '距离'),
+  st('scout.stock', '花源储量', 1, 1, 10, '倍'),
+  st('scout.regrowth', '花源恢复效率', 1, 1, 10, '倍'),
   st('scout.intel', '信息持续时间', 360, 60, 7200, '秒'),
   st('scout.rare', '稀有发现率', 0.18, 0, 0.95, ''),
   st('forager.speed', '采集飞行速度', 45, 5, 500, '距离/秒'),
@@ -105,17 +107,17 @@ const BUILDINGS: BuildingDef[] = [
   { id: Bld.Queen, name: '蜂后室', desc: '蜂后产卵与繁育，蜂巢的中心', adjacency: '相邻育婴房提高孵化效率',
     costs: [], maxCount: 1, unlockTask: '' },
   { id: Bld.ScoutRoom, name: '侦察蜂巢房', desc: '解锁侦察蜂', adjacency: '无',
-    costs: [c(Res.Honey, 60, 4)], maxCount: 3, unlockTask: 't_first_egg' },
+    costs: [c(Res.Honey, 60, 4)], maxCount: 3, unlockTask: 't_first_forager' },
   { id: Bld.ForagerRoom, name: '采集蜂巢房', desc: '解锁采集蜂', adjacency: '无',
-    costs: [c(Res.Honey, 140, 3)], maxCount: 3, unlockTask: 't_first_dance' },
+    costs: [c(Res.Honey, 45, 3)], maxCount: 3, unlockTask: 't_first_house' },
   { id: Bld.Storage, name: '储蜜格', desc: '提升资源上限并承担越冬储备，开启正式四季', adjacency: '储蜜格彼此相邻提高总容量',
-    costs: [c(Res.Honey, 160, 1.7)], maxCount: 30, unlockTask: 't_auto_loop' },
+    costs: [c(Res.Honey, 160, 1.7)], maxCount: 30, unlockTask: 't_first_scout' },
   { id: Bld.Nursery, name: '育婴房', desc: '增加孵化队列与人口上限', adjacency: '靠近蜂后室提高孵化效率',
     costs: [c(Res.Honey, 220, 1.8), c(Res.Wax, 8, 1.6)], maxCount: 12, unlockTask: 't_first_expand' },
-  { id: Bld.Brewery, name: '酿蜜房', desc: '解锁巢内工蜂，花蜜与蜂蜜形成可管理的产线', adjacency: '靠近储蜜格提高加工与入库效率',
-    costs: [c(Res.Honey, 320, 1.85), c(Res.Wax, 12, 1.6)], maxCount: 12, unlockTask: 't_first_expand' },
+  { id: Bld.Brewery, name: '酿蜜房', desc: '立即加快酿蜜，解锁巢内工蜂进一步提高加工效率', adjacency: '靠近储蜜格提高加工与入库效率',
+    costs: [c(Res.Honey, 18, 1.85)], maxCount: 12, unlockTask: 't_first_nectar' },
   { id: Bld.GuardRoom, name: '守卫巢房', desc: '解锁守卫蜂', adjacency: '位于最外圈时提高巢门防御范围',
-    costs: [c(Res.Honey, 450, 1.9), c(Res.Wax, 20, 1.6)], maxCount: 8, unlockTask: 't_first_house' },
+    costs: [c(Res.Honey, 450, 1.9), c(Res.Wax, 20, 1.6)], maxCount: 8, unlockTask: 't_first_expand' },
   { id: Bld.Evolution, name: '进化腔', desc: '当前种区研究与蜂王传承入口', adjacency: '靠近中心功能区提高全局加成效果',
     costs: [c(Res.Honey, 1200, 3), c(Res.Wax, 60, 2)], maxCount: 1, unlockTask: 't_survive_winter' }
 ];
@@ -132,6 +134,8 @@ const TRACKS: UpgradeTrackDef[] = [
     [kl(10, 'nursery_batch', '育婴房可批量分化')]),
   tr('nursery.slots', Bld.Nursery, 'nursery.slots', '队列数量', 1, 'add', 8, [c(H, 300, 1.7), c(W, 10, 1.5)], []),
   tr('nursery.cost', Bld.Nursery, 'nursery.costMul', '幼虫培养消耗', -0.04, 'pct', 10, [c(H, 350, 1.55)], []),
+  tr('scout.stock', Bld.ScoutRoom, 'scout.stock', '花源储量', 0.25, 'pct', 20, [c(H, 70, 1.4)], []),
+  tr('scout.regrowth', Bld.ScoutRoom, 'scout.regrowth', '花源恢复效率', 0.2, 'pct', 20, [c(H, 80, 1.4)], []),
   tr('scout.speed', Bld.ScoutRoom, 'scout.speed', '飞行速度', 0.1, 'pct', 20, [c(H, 90, 1.4)], []),
   tr('scout.discovery', Bld.ScoutRoom, 'scout.discovery', '发现效率', 0.12, 'pct', 20, [c(H, 110, 1.42)], []),
   tr('scout.range', Bld.ScoutRoom, 'scout.range', '侦察范围', 70, 'add', 15, [c(H, 160, 1.5)],
@@ -172,11 +176,11 @@ function fl(id: string, name: string, tier: number, yieldMul: number, maxStock: 
 }
 
 const FLOWERS: FlowerDef[] = [
-  fl('wild', '野花丛', 1, 1.0, 120, 1.2, 0, 'sunflower', '#F7C8E0', '#F2B705', false),
+  fl('wild', '野花丛', 1, 1.0, 24, 0.25, 0, 'sunflower', '#F7C8E0', '#F2B705', false),
   fl('sunflower', '向日葵花田', 2, 1.6, 260, 2.4, 0, 'lavender', '#FFC93C', '#7A4B1E', false),
   fl('lavender', '薰衣草田', 3, 2.4, 480, 4.0, 0, 'eco', '#A88BEB', '#5B3FA0', false),
   fl('eco', '稀有生态花田', 4, 3.4, 800, 6.0, 0.004, '', '#6FD3C1', '#1F7A6C', true),
-  fl('clover', '三叶草地', 1, 1.1, 140, 1.4, 0, 'sunflower', '#FFFFFF', '#79B851', false),
+  fl('clover', '三叶草地', 1, 1.1, 30, 0.3, 0, 'sunflower', '#FFFFFF', '#79B851', false),
   fl('rapeseed', '油菜花田', 2, 1.8, 300, 2.6, 0, 'lavender', '#F9E04B', '#C9A100', false),
   fl('snowlotus', '雪莲', 4, 2.8, 400, 3.0, 0.008, '', '#EAF6FF', '#9CC9E8', true),
   fl('waterlily', '睡莲', 4, 2.6, 420, 3.2, 0.008, '', '#FFB7C5', '#F2D16B', true),
@@ -313,17 +317,17 @@ function tk(id: string, name: string, desc: string, kind: string, rewards: Rewar
 
 const TASKS: TaskDef[] = [
   tk('t_first_nectar', '第一滴花蜜', '点击花朵采集花蜜', 'main', [rw(H, 4)]),
+  tk('t_build_brewery', '酿蜜房', '建造酿蜜房，缓解花蜜转化瓶颈', 'main', [rw(H, 4)]),
   tk('t_first_egg', '首次产卵', '蜂后消耗蜂蜜产下第一只幼虫', 'main', [rw(H, 30)]),
+  tk('t_first_house', '巢内工蜂', '分化第一只巢内工蜂', 'main', [rw(H, 15)]),
+  tk('t_build_forager', '采集蜂巢房', '建造采集蜂巢房', 'main', [rw(H, 15)]),
+  tk('t_first_forager', '第一只采集蜂', '把幼虫分化为采集蜂', 'main', [rw(H, 20)]),
   tk('t_build_scout', '侦察蜂巢房', '在蜂巢空格上建造侦察蜂巢房', 'main', [rw(H, 10)]),
   tk('t_first_scout', '第一只侦察蜂', '把幼虫分化为侦察蜂', 'main', [rw(H, 10)]),
   tk('t_first_dance', '摇摆舞', '侦察蜂发现花田并回巢跳舞', 'main', [rw(H, 20)]),
-  tk('t_build_forager', '采集蜂巢房', '建造采集蜂巢房', 'main', [rw(H, 15)]),
-  tk('t_first_forager', '第一只采集蜂', '把幼虫分化为采集蜂', 'main', [rw(H, 20)]),
-  tk('t_auto_loop', '蜂巢开始自行运转', '采集蜂自动运蜜，蜂后自动产卵', 'main', [rw(H, 60)]),
+  tk('t_auto_loop', '采酿产线接通', '采集蜂累计运回15花蜜，繁育由你手动决定', 'main', [rw(H, 60)]),
   tk('t_build_storage', '第一个储蜜格', '建造储蜜格，正式四季随之开启', 'main', [rw(W, 30)]),
   tk('t_first_expand', '首次扩巢', '消耗蜂蜡扩建一个新的六边形格子', 'main', [rw(H, 80)]),
-  tk('t_build_brewery', '酿蜜房', '建造酿蜜房，正式拆分花蜜与蜂蜜', 'main', [rw(W, 20)]),
-  tk('t_first_house', '巢内工蜂', '分化第一只巢内工蜂', 'main', [rw(H, 100)]),
   tk('t_first_wax', '分泌蜂蜡', '让巢内工蜂筑巢，产出第一份蜂蜡', 'main', [rw(W, 15)]),
   tk('t_build_guard', '守卫巢房', '建造守卫巢房以应对敌害', 'main', [rw(H, 120)]),
   tk('t_first_clear', '首次击退', '守卫蜂清除一次敌害', 'main', [rw(Res.Jelly, 1)]),
@@ -359,23 +363,24 @@ function tu(id: string, title: string, text: string, focus: string, doneTask: st
   return d;
 }
 
-// 新手引导节点：采蜜 → 产卵 → 侦察蜂巢房 → 侦察蜂 → 采集蜂巢房 → 采集蜂 → 储蜜格（之后的系统由 Guide 气泡按需介绍）。
+// 先改善加工，再补采集与花源；首只侦察蜂完成后交还发展决策。
 const TUTORIAL: TutorialStepDef[] = [
-  tu('tap', '采集花蜜', '点击花田里的花朵，采集第一份花蜜。蜂巢会把花蜜慢慢转化为蜂蜜。', 'field', 't_first_nectar'),
-  tu('egg', '蜂后产卵', '蜂蜜够了！打开「蜂后」，消耗蜂蜜产下第一只幼虫。', 'queen', 't_first_egg'),
-  tu('scoutRoom', '建造侦察蜂巢房', '切换到蜂巢，点击蜂后室旁的空格，建造侦察蜂巢房。', 'hive', 't_build_scout'),
-  tu('scout', '培养侦察蜂', '把幼虫培养成侦察蜂，它会去找新的花田。', 'queen', 't_first_scout'),
-  tu('foragerRoom', '建造采集蜂巢房', '侦察蜂跳完摇摆舞后，建造采集蜂巢房。', 'hive', 't_build_forager'),
-  tu('forager', '培养采集蜂', '培养第一只采集蜂，之后蜂后会自动产卵、自动培养。', 'queen', 't_first_forager'),
-  tu('storage', '建造储蜜格', '蜂巢会自动为储蜜格攒蜂蜜，攒够后建造储蜜格，正式四季开始。', 'hive', 't_build_storage')
+  tu('tap', '采集花蜜', '点击花丛采蜜。基础酿蜜很慢，积攒18蜂蜜先改善加工。', 'field', 't_first_nectar'),
+  tu('brewery', '建造酿蜜房', '花蜜堆着酿不完？建造酿蜜房，立即加快转换。', 'hive', 't_build_brewery'),
+  tu('egg', '手动孵化', '打开蜂后页，点击孵化获得幼虫。每次孵化的新卵都会更贵。', 'queen', 't_first_egg'),
+  tu('house', '分化巢内工蜂', '选择将幼虫分化为巢内工蜂，进一步提高酿蜜能力。', 'queen', 't_first_house'),
+  tu('foragerRoom', '建造采集蜂巢房', '酿蜜变快，花蜜不够了。建造采集蜂巢房补充原料。', 'hive', 't_build_forager'),
+  tu('forager', '分化采集蜂', '手动孵化，再选择分化为采集蜂。采集蜂会自动运输花蜜。', 'queen', 't_first_forager'),
+  tu('scoutRoom', '建造侦察蜂巢房', '近处花丛有限，采空后需要恢复。建造侦察蜂巢房寻找更多花源。', 'hive', 't_build_scout'),
+  tu('scout', '分化侦察蜂', '手动孵化并分化第一只侦察蜂。升级侦察房可增加花源储量、缩短恢复等待。', 'queen', 't_first_scout')
 ];
 
 export const DEFAULT_CONFIG: GameConfigDef = {
-  configVersion: '0.1.0-cfg6',
+  configVersion: '0.1.0-cfg7',
   schemaVersion: 2,
   economy: {
     manualYield: 2,
-    baseConvertRate: 3.0,
+    baseConvertRate: 0.6,
     perBeeConvert: 0.12,
     baseConvertRatio: 0.5,
     houseBrewRate: 1.5,
@@ -383,7 +388,7 @@ export const DEFAULT_CONFIG: GameConfigDef = {
     waxHoneyPerSec: 0.4,
     waxRatio: 0.25,
     queenWaxTrickle: 0.02,
-    eggCost: c(Res.Honey, 8, 1.012),
+    eggCost: c(Res.Honey, 8, 1.12),
     layInterval: 7,
     queenSlots: 2,
     nurserySlots: 2,

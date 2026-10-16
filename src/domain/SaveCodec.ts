@@ -53,7 +53,7 @@ export interface SaveDTO {
 }
 
 export const SCHEMA_VERSION = 2;
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = '0.4.0';
 
 function bigOut(r: Record<string, BigNum>): Record<string, string> {
   const o: Record<string, string> = {};
@@ -236,6 +236,9 @@ export function repair(d: SaveDTO): void {
   const r = d.run;
   r.time = Math.max(0, num(r.time, 0));
   const c = r.colony;
+  c.autoLay = false;
+  c.autoHatch = false;
+  c.eggsLaid = Math.max(0, Math.floor(num(c.eggsLaid, 0)));
   c.larvae = Math.max(0, Math.floor(num(c.larvae, 0)));
   ALL_ROLES.forEach((k: string) => {
     c.roles[k] = Math.max(0, Math.floor(num(c.roles[k], 0)));
@@ -262,6 +265,7 @@ export function repair(d: SaveDTO): void {
   }
   r.map.fields.forEach((f: FlowerField) => {
     f.stock = Math.max(0, num(f.stock, 0));
+    if (f.depletedAt !== undefined) f.depletedAt = Math.max(0, num(f.depletedAt, 0));
     f.growth = Math.max(0, num(f.growth, 0));
   });
   if (d.messages === undefined) {
