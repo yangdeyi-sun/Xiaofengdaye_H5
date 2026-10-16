@@ -501,7 +501,7 @@ export function drawResIcon(ctx: CanvasRenderingContext2D, res: string, x: numbe
   ctx.save();
   ctx.translate(x, y);
   if (res === 'nectar') {
-    ctx.fillStyle = '#7FD1F7';
+    ctx.fillStyle = '#F9CB48';
     ctx.beginPath();
     ctx.moveTo(0, -r);
     ctx.quadraticCurveTo(r, 0, 0, r);

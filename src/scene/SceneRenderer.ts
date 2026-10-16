@@ -1201,14 +1201,19 @@ export class SceneRenderer {
       const ly = f.y + R * 0.6 + 16;
       ctx.fillStyle = 'rgba(83,75,59,0.82)';
       ctx.fillText(label, f.x, ly);
-      const stock = ratio < 0.08 ? 'empty' : (ratio < 0.4 ? 'low' : (ratio < 0.85 ? 'high' : 'full'));
+      // 保留原位置和宽度，仅增强绿色库存条与草地的对比。
       const bw = 40 * k;
-      if (!Sprites.still(ctx, `art/v1/stock_${stock}.webp`, f.x, ly + 11 * k, bw * 1.18, bw * 1.18, 1)) {
-        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        roundRect(ctx, f.x - bw / 2, ly + 8, bw, 4, 2);
-        ctx.fill();
-        ctx.fillStyle = '#FFD54A';
-        roundRect(ctx, f.x - bw / 2, ly + 8, bw * ratio, 4, 2);
+      const bh = 6 * k;
+      const barY = ly + 8 * k;
+      ctx.fillStyle = '#263D1D';
+      roundRect(ctx, f.x - bw / 2, barY, bw, bh, 2 * k);
+      ctx.fill();
+      ctx.strokeStyle = '#F4F5D6';
+      ctx.lineWidth = k;
+      ctx.stroke();
+      if (ratio > 0) {
+        ctx.fillStyle = '#79E34B';
+        roundRect(ctx, f.x - bw / 2, barY, Math.max(k, bw * ratio), bh, 2 * k);
         ctx.fill();
       }
       if (f.fieldId === this.selectedField) {
