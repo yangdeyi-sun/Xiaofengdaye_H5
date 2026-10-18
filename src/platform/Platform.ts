@@ -64,6 +64,8 @@ export interface Platform {
   readonly images: ImageLoader;
   readonly ads: AdBackend;
   vibrate(ms: number): void;
+  /** 尝试固定屏幕方向；原生壳保证可用，普通浏览器受系统权限限制时返回 false。 */
+  setOrientation?(orientation: 'landscape' | 'portrait'): Promise<boolean>;
   /** 单调时钟（毫秒） */
   perfNow(): number;
   requestFrame(callback: (now: number) => void): number;

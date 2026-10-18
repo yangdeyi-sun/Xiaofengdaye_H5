@@ -2,7 +2,7 @@ import { BigNum } from '../common/BigNum';
 import { checksum } from '../common/Rng';
 import { ALL_RES, ALL_ROLES } from './Types';
 import {
-  ColonyState, FlowerField, GameMessage, GameState, HiveState, LedgerEntry, MapState, MetaState, RunState, RunStats, SeasonState,
+  ColonySlot, ColonyState, FlowerField, GameMessage, GameState, HiveState, LedgerEntry, MapState, MetaState, RunState, RunStats, SeasonState,
   ThreatState
 } from './State';
 
@@ -43,6 +43,8 @@ export interface RunDTO {
 export interface SaveDTO {
   meta: MetaState;
   run: RunDTO;
+  activeColonyId: string;
+  colonies: Array<{ id: string; name: string; run: RunDTO; lastActiveAt: number }>;
   messages: GameMessage[];
   nextMessageId: number;
   ledger: LedgerEntry[];
@@ -52,8 +54,8 @@ export interface SaveDTO {
   lastSettlementId: string;
 }
 
-export const SCHEMA_VERSION = 2;
-export const APP_VERSION = '0.5.0';
+export const SCHEMA_VERSION = 3;
+export const APP_VERSION = '0.5.1';
 
 function bigOut(r: Record<string, BigNum>): Record<string, string> {
   const o: Record<string, string> = {};
@@ -73,17 +75,31 @@ function bigIn(r: Record<string, string>): Record<string, BigNum> {
   return o;
 }
 
-export function toDTO(s: GameState): SaveDTO {
-  const run = s.run;
-  const r: RunDTO = {
+function runToDTO(run: RunState): RunDTO {
+  return {
     regionId: run.regionId, regionIndex: run.regionIndex, seed: run.seed, rngState: run.rngState, time: run.time,
     res: bigOut(run.res), overflow: bigOut(run.overflow), produced: bigOut(run.produced), hive: run.hive,
     upgrades: run.upgrades, research: run.research, colony: run.colony, map: run.map, season: run.season,
     threats: run.threats, tasksDone: run.tasksDone, tasksClaimed: run.tasksClaimed,
     colonyTaskCycle: run.colonyTaskCycle, stats: run.stats
   };
+}
+
+function runFromDTO(r: RunDTO): RunState {
+  return {
+    regionId: r.regionId, regionIndex: r.regionIndex, seed: r.seed, rngState: r.rngState, time: r.time,
+    res: bigIn(r.res), overflow: bigIn(r.overflow), produced: bigIn(r.produced), hive: r.hive, upgrades: r.upgrades,
+    research: r.research, colony: r.colony, map: r.map, season: r.season, threats: r.threats,
+    tasksDone: r.tasksDone, tasksClaimed: r.tasksClaimed, colonyTaskCycle: r.colonyTaskCycle, stats: r.stats
+  };
+}
+
+export function toDTO(s: GameState): SaveDTO {
   const d: SaveDTO = {
-    meta: s.meta, run: r, messages: s.messages, nextMessageId: s.nextMessageId, ledger: s.ledger,
+    meta: s.meta, run: runToDTO(s.run), activeColonyId: s.activeColonyId,
+    colonies: s.colonies.map((slot: ColonySlot) => ({
+      id: slot.id, name: slot.name, run: runToDTO(slot.run), lastActiveAt: slot.lastActiveAt
+    })), messages: s.messages, nextMessageId: s.nextMessageId, ledger: s.ledger,
     nextLedgerId: s.nextLedgerId, lastSavedAt: s.lastSavedAt, lastTrustedTime: s.lastTrustedTime,
     lastSettlementId: s.lastSettlementId
   };
@@ -91,15 +107,11 @@ export function toDTO(s: GameState): SaveDTO {
 }
 
 export function fromDTO(d: SaveDTO): GameState {
-  const r = d.run;
-  const run: RunState = {
-    regionId: r.regionId, regionIndex: r.regionIndex, seed: r.seed, rngState: r.rngState, time: r.time,
-    res: bigIn(r.res), overflow: bigIn(r.overflow), produced: bigIn(r.produced), hive: r.hive, upgrades: r.upgrades,
-    research: r.research, colony: r.colony, map: r.map, season: r.season, threats: r.threats,
-    tasksDone: r.tasksDone, tasksClaimed: r.tasksClaimed, colonyTaskCycle: r.colonyTaskCycle, stats: r.stats
-  };
   const s: GameState = {
-    meta: d.meta, run: run, messages: d.messages, nextMessageId: d.nextMessageId, ledger: d.ledger,
+    meta: d.meta, run: runFromDTO(d.run), activeColonyId: d.activeColonyId,
+    colonies: d.colonies.map((slot) => ({
+      id: slot.id, name: slot.name, run: runFromDTO(slot.run), lastActiveAt: slot.lastActiveAt
+    })), messages: d.messages, nextMessageId: d.nextMessageId, ledger: d.ledger,
     nextLedgerId: d.nextLedgerId, lastSavedAt: d.lastSavedAt, lastTrustedTime: d.lastTrustedTime,
     lastSettlementId: d.lastSettlementId
   };
@@ -175,7 +187,7 @@ export function decodeEnvelope(text: string): DecodeResult {
   return res;
 }
 
-/** 逐级迁移器：v1 → v2 增加功能解锁、离线结算ID与统计字段 */
+/** 逐级迁移器：v1 → v2 增加功能解锁；v2 → v3 增加多蜂群与屏幕方向。 */
 export function migrate(d: SaveDTO, from: number): SaveDTO {
   if (from === 1) {
     if (d.meta.featureUnlocks === undefined) {
@@ -184,6 +196,11 @@ export function migrate(d: SaveDTO, from: number): SaveDTO {
     if (d.lastSettlementId === undefined) {
       d.lastSettlementId = '';
     }
+  }
+  if (from === 2) {
+    d.activeColonyId = 'colony-0';
+    d.colonies = [];
+    d.meta.settings.orientation = 'landscape';
   }
   return d;
 }
@@ -201,6 +218,9 @@ export function repair(d: SaveDTO): void {
   settings.effectsVolume = Math.max(0, Math.min(100, num(settings.effectsVolume, 75)));
   if (settings.eventAnimations === undefined) {
     settings.eventAnimations = true;
+  }
+  if (settings.orientation !== 'portrait' && settings.orientation !== 'landscape') {
+    settings.orientation = 'landscape';
   }
   const gameSpeed = num(settings.gameSpeed, 1);
   settings.gameSpeed = [1, 2, 4].indexOf(gameSpeed) >= 0 ? gameSpeed : 1;
@@ -233,7 +253,21 @@ export function repair(d: SaveDTO): void {
   if (m.inheritance.presets === undefined) {
     m.inheritance.presets = [];
   }
-  const r = d.run;
+  if (typeof d.activeColonyId !== 'string' || d.activeColonyId.length === 0) d.activeColonyId = 'colony-0';
+  if (!Array.isArray(d.colonies)) d.colonies = [];
+  repairRun(d.run);
+  d.colonies = d.colonies.filter((slot) => slot !== null && slot !== undefined && slot.run !== undefined);
+  d.colonies.forEach((slot) => {
+    slot.lastActiveAt = Math.max(0, num(slot.lastActiveAt, d.lastSavedAt));
+    if (typeof slot.id !== 'string' || slot.id.length === 0) slot.id = `colony-${slot.run.regionIndex}`;
+    if (typeof slot.name !== 'string' || slot.name.length === 0) slot.name = slot.run.regionId;
+    repairRun(slot.run);
+  });
+  if (d.messages === undefined) d.messages = [];
+  if (d.ledger === undefined) d.ledger = [];
+}
+
+function repairRun(r: RunDTO): void {
   r.time = Math.max(0, num(r.time, 0));
   const c = r.colony;
   c.autoLay = false;
@@ -268,10 +302,4 @@ export function repair(d: SaveDTO): void {
     if (f.depletedAt !== undefined) f.depletedAt = Math.max(0, num(f.depletedAt, 0));
     f.growth = Math.max(0, num(f.growth, 0));
   });
-  if (d.messages === undefined) {
-    d.messages = [];
-  }
-  if (d.ledger === undefined) {
-    d.ledger = [];
-  }
 }

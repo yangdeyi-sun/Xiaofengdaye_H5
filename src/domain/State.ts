@@ -212,6 +212,16 @@ export interface SettingsState {
   privacyAccepted: boolean;
   privacyVersion: string;
   fontScaleSafe: boolean;
+  /** 游戏画面固定方向；由平台层应用，避免重力感应导致横竖屏反复切换。 */
+  orientation: 'landscape' | 'portrait';
+}
+
+/** 非当前蜂群的完整运行快照；再次切换时按离线时长补算经营进度。 */
+export interface ColonySlot {
+  id: string;
+  name: string;
+  run: RunState;
+  lastActiveAt: number;
 }
 
 export interface SwarmRecord {
@@ -247,6 +257,8 @@ export interface MetaState {
 export interface GameState {
   meta: MetaState;
   run: RunState;
+  activeColonyId: string;
+  colonies: ColonySlot[];
   messages: GameMessage[];
   nextMessageId: number;
   ledger: LedgerEntry[];

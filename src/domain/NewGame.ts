@@ -52,7 +52,7 @@ export function generateFields(cfg: GameConfigDef, region: RegionDef, rng: Rng):
     const id = region.flowerPool[0];
     const f: FlowerField = {
       fieldId: `f${i}`, flower: id, x: Math.cos(a) * d, y: Math.sin(a) * d, dist: d, level: 1,
-      stock: flowerStock(cfg, id) * 0.8, danger: 0, discovered: true, intelExpiresAt: 1e12, danceBonusUntil: 0,
+      stock: flowerStock(cfg, id), danger: 0, discovered: true, intelExpiresAt: 1e12, danceBonusUntil: 0,
       growth: 0, home: true, hidden: false, webbed: false
     };
     out.push(f);
@@ -142,7 +142,8 @@ export function createInitialState(cfg: GameConfigDef, playerId: string, now: nu
     music: true, sfx: true, musicVolume: 80, ambientVolume: 65, effectsVolume: 75,
     vibration: true, particles: true, reduceMotion: false, eventAnimations: true, gameSpeed: 1,
     ecoMode: false, skin: 'classic',
-    continuation: false, privacyAccepted: false, privacyVersion: '', fontScaleSafe: true
+    continuation: false, privacyAccepted: false, privacyVersion: '', fontScaleSafe: true,
+    orientation: 'landscape'
   };
   const meta: MetaState = {
     playerId: playerId, createdAt: now, totalPlayTime: 0, swarmCount: 0, regionsVisited: [cfg.regions[0].id],
@@ -150,7 +151,8 @@ export function createInitialState(cfg: GameConfigDef, playerId: string, now: nu
     tutorialStep: 0, tutorialDone: false, history: [], totalWinters: 0, featureUnlocks: [], introsSeen: []
   };
   const gs: GameState = {
-    meta: meta, run: createRun(cfg, cfg.regions[0].id, 0, seed, 0), messages: [], nextMessageId: 1, ledger: [],
+    meta: meta, run: createRun(cfg, cfg.regions[0].id, 0, seed, 0), activeColonyId: 'colony-0', colonies: [],
+    messages: [], nextMessageId: 1, ledger: [],
     nextLedgerId: 1, lastSavedAt: now, lastTrustedTime: now, lastSettlementId: ''
   };
   return gs;

@@ -25,6 +25,10 @@ ok(DEFAULT_CONFIG.tutorial.length === 8 && DEFAULT_CONFIG.tutorial[7].doneTask =
   'tutorial ends with the first scout (8 steps)');
 ok(DEFAULT_CONFIG.economy.overflowDecayPerMin === 0.005, 'overflow decay reduced to 0.5% per minute');
 ok(softExponent(40, 20) < 40 && softExponent(20, 20) === 20, 'segmented soft cap preserves threshold and softens tail');
+const upgradeHoney = DEFAULT_CONFIG.tracks.map((track) => track.costs.find((cost) => cost.res === Res.Honey)).filter(Boolean);
+ok(upgradeHoney.every((cost) => cost!.base >= 45 && cost!.base <= 50 && cost!.growth === 1.25),
+  'attribute upgrades start at 45-50 honey and grow by 1.25x');
+ok(DEFAULT_CONFIG.tracks.some((track) => track.id === 'scout.quality'), 'scout room includes nectar quality upgrade');
 
 // ---------- 大数 ----------
 const a = BigNum.of(1234.5);
@@ -70,6 +74,21 @@ function runFor(eng: GameEngine, sec: number) {
 
 const st = createInitialState(DEFAULT_CONFIG, 'tester', 1000, 777);
 const eng = new GameEngine(DEFAULT_CONFIG, st);
+ok(eng.run.map.fields.filter((field) => field.home).every((field) => field.stock === 20), 'home flowers start with 20 nectar');
+const balanceState = createInitialState(DEFAULT_CONFIG, 'balance', 0, 777);
+const balance = new GameEngine(DEFAULT_CONFIG, balanceState);
+balance.run.hive.cells.find((cell) => cell.ring === 1)!.building = Bld.Brewery;
+balance.run.colony.roles[Role.Forager] = 1;
+balance.run.colony.roles[Role.House] = 1;
+balance.hive.recomputeAdjacency();
+balance.w.attrs.recompute();
+const gatherRate = balance.w.attrs.get('forager.carry') / balance.map.tripTime(balance.run.map.fields[0]);
+const honeyCapacity = balance.prod.estimateHoneyRate(1e6);
+ok(gatherRate / honeyCapacity >= 1.15 && gatherRate / honeyCapacity <= 1.35,
+  'initial forager travel+collection is balanced near 1.25:1 against honey conversion', `${gatherRate / honeyCapacity}`);
+const farField = eng.run.map.fields.find((field) => !field.home && field.dist > eng.w.attrs.get('scout.range'))!;
+eng.map.publishDiscovery(farField.fieldId);
+ok(!farField.discovered, 'flowers outside scout range stay locked');
 runFor(eng, 1500);
 ok(eng.w.role(Role.Forager) > 0, 'forager by 25min');
 
@@ -121,7 +140,31 @@ const rep = decodeEnvelope(JSON.stringify(envBad));
 ok(rep.ok && rep.state !== null && rep.state.run.colony.larvae === 0 && rep.state.run.res[Res.Honey].isZero() &&
   rep.state.run.colony.roles[Role.Forager] === 0, 'repair illegal values');
 ok(rep.state !== null && rep.state.meta.settings.musicVolume === 80 && rep.state.meta.settings.eventAnimations &&
-  rep.state.meta.settings.gameSpeed === 1, 'repair adds new settings defaults');
+  rep.state.meta.settings.gameSpeed === 1 && rep.state.meta.settings.orientation === 'landscape',
+  'repair adds new settings defaults');
+
+// v2 -> v3：旧存档补齐方向与多蜂群容器
+const env2 = JSON.parse(text) as SaveEnvelope;
+const payload2 = JSON.parse(env2.payload);
+delete payload2.activeColonyId;
+delete payload2.colonies;
+delete payload2.meta.settings.orientation;
+env2.schemaVersion = 2;
+env2.payload = JSON.stringify(payload2);
+env2.checksum = checksum(env2.payload);
+const mig2 = decodeEnvelope(JSON.stringify(env2));
+ok(mig2.ok && mig2.state?.activeColonyId === 'colony-0' && mig2.state.colonies.length === 0 &&
+  mig2.state.meta.settings.orientation === 'landscape', 'migrate v2 adds multi-colony and orientation defaults');
+
+// 已解锁巢格之间可无损移动或交换建筑
+const swapState = createInitialState(DEFAULT_CONFIG, 'swap', 0, 12);
+const swapEngine = new GameEngine(DEFAULT_CONFIG, swapState);
+const swapA = swapEngine.run.hive.cells.find((cell) => cell.ring === 1)!;
+const swapB = swapEngine.run.hive.cells.find((cell) => cell.ring === 1 && cell.cellId !== swapA.cellId)!;
+swapA.building = Bld.Storage;
+swapB.building = Bld.Brewery;
+ok(swapEngine.swapCells(swapA.cellId, swapB.cellId).ok && swapA.building === Bld.Brewery && swapB.building === Bld.Storage,
+  'unlocked hive cells swap buildings without demolition');
 
 // ---------- 离线 ----------
 const st2 = decodeEnvelope(text).state!;
@@ -239,8 +282,23 @@ ok(e5.run.regionId === 'rooftop' && e5.run.time === 0 && e5.w.adults() === 0, 's
 ok(e5.state.meta.inheritance.totalPoints > before5 && e5.state.meta.swarmCount === 1, 'swarm grants points');
 ok(e5.state.meta.codexFlowers.length > 0, 'swarm keeps codex');
 ok(Object.keys(e5.run.upgrades).length === 0 && Object.keys(e5.run.research).length === 0, 'swarm resets upgrades');
+ok(e5.state.colonies.length === 1 && e5.state.colonies[0].run.colony.roles[Role.Forager] === 200,
+  'swarm preserves original colony for later switching');
+const multiSave = decodeEnvelope(encodeEnvelope(e5.state, DEFAULT_CONFIG.configVersion, 6000));
+ok(multiSave.ok && multiSave.state?.colonies.length === 1 && multiSave.state.colonies[0].run.res[Res.Honey] instanceof BigNum,
+  'multi-colony save roundtrip preserves BigNum resources');
 const rooftopMax = Math.max(...e5.run.hive.cells.map((c) => c.ring));
 ok(rooftopMax === 3, 'rooftop region rule maxRing=3', `${rooftopMax}`);
+
+// 冬季结束只产生一条合并后的季节提示，避免“过冬成功”与“春季到了”重叠。
+const seasonState = createInitialState(DEFAULT_CONFIG, 'season-popup', 0, 31);
+const seasonEngine = new GameEngine(DEFAULT_CONFIG, seasonState);
+seasonEngine.run.season.formal = true;
+seasonEngine.run.season.season = 'winter';
+seasonEngine.run.season.endsAt = 0;
+seasonEngine.season.tick(0.1);
+ok(seasonEngine.state.messages.filter((message) => message.kind === 'season').length === 1,
+  'winter-to-spring emits one season notice');
 
 // ---------- 首冬保护 ----------
 const s6 = decodeEnvelope(text).state!;

@@ -38,6 +38,15 @@ export interface StatusCardData {
   updated: string;
 }
 
+export interface ColonyChoice {
+  id: string;
+  name: string;
+  region: string;
+  active: boolean;
+  bees: number;
+  honey: string;
+}
+
 export class GameSession {
   eng: GameEngine | null = null;
   renderer: SceneRenderer | null = null;
@@ -152,6 +161,56 @@ export class GameSession {
     this.audio.vibrateOn = settings.vibration;
     this.audio.setMusic(settings.music);
     this.audio.setVolumes(settings.musicVolume / 100, settings.ambientVolume / 100, settings.effectsVolume / 100);
+    void platform().setOrientation?.(settings.orientation);
+  }
+
+  async setOrientation(orientation: 'landscape' | 'portrait'): Promise<boolean> {
+    if (this.eng === null) return false;
+    this.eng.state.meta.settings.orientation = orientation;
+    this.eng.saveRequested = true;
+    const applied = await (platform().setOrientation?.(orientation) ?? Promise.resolve(false));
+    this.saveNow();
+    return applied;
+  }
+
+  colonyChoices(): ColonyChoice[] {
+    const engine = this.engine();
+    const state = engine.state;
+    const active: ColonyChoice = {
+      id: state.activeColonyId, name: `${engine.w.region().name}蜂群`, region: engine.w.region().name,
+      active: true, bees: engine.w.adults(), honey: formatBig(engine.w.econ.amount(Res.Honey))
+    };
+    const inactive = state.colonies.map((slot) => {
+      const region = DEFAULT_CONFIG.regions.find((item) => item.id === slot.run.regionId)?.name ?? slot.run.regionId;
+      const bees = Object.values(slot.run.colony.roles).reduce((sum, value) => sum + Math.max(0, value), 0);
+      return { id: slot.id, name: slot.name, region, active: false, bees, honey: formatBig(slot.run.res[Res.Honey]) };
+    });
+    return [active, ...inactive];
+  }
+
+  /** 保存当前蜂群并切入目标蜂群；目标离开期间的生产按离线规则一次性补算。 */
+  switchColony(id: string): boolean {
+    if (this.eng === null || id === this.eng.state.activeColonyId) return false;
+    const state = this.eng.state;
+    const index = state.colonies.findIndex((slot) => slot.id === id);
+    if (index < 0) return false;
+    const now = TimeService.now();
+    const target = state.colonies[index];
+    state.colonies.splice(index, 1);
+    state.colonies.push({
+      id: state.activeColonyId, name: `${this.eng.w.region().name}蜂群`, run: state.run, lastActiveAt: now
+    });
+    state.activeColonyId = target.id;
+    state.run = target.run;
+    state.lastSavedAt = now;
+    this.useState(state);
+    const elapsed = Math.max(0, (now - target.lastActiveAt) / 1000);
+    if (elapsed >= 5) {
+      const report = this.engine().settleOffline(elapsed, `colony:${target.id}:${target.lastActiveAt}`, '');
+      if (report !== null && report.credited >= AWAY_REPORT_SEC) this.pendingOffline = report;
+    }
+    this.saveNow();
+    return true;
   }
 
   start(): void {

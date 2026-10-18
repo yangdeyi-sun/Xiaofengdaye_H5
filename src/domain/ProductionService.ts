@@ -175,7 +175,8 @@ export class SeasonService {
       s.season = to;
       s.startedAt = s.endsAt;
       s.endsAt = s.endsAt + Math.max(10, this.duration(to));
-      this.w.msg('season', `${this.def(to).name}到了`);
+      // 冬去春来已经有一条完整提示，不再额外排队“春季到了”，避免两张季节弹窗重叠。
+      if (from !== SeasonId.Winter) this.w.msg('season', `${this.def(to).name}到了`);
       this.onChange(from, to);
     }
     this.upkeep(dt);

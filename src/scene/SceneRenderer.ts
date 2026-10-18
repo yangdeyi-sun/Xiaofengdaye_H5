@@ -342,7 +342,6 @@ export class SceneRenderer {
         this.victoryFx(e.text);
       } else if (e.kind === 'spring') {
         this.screenFx('atlas_vfx_12', 'spring_return');
-        this.addText('banner', 0, 0, e.text, '#FFFFFF', true, '');
       } else if (e.kind === 'season') {
         const s = this.eng.run.season.season;
         const anim = s === SeasonId.Winter || s === SeasonId.WinterPrep ? 'season_winter' :
@@ -351,7 +350,6 @@ export class SceneRenderer {
         if (anim !== 'season_autumn') {
           this.screenFx('atlas_vfx_11', anim);
         }
-        this.addText('banner', 0, 0, e.text, '#FFFFFF', true, '');
       } else if (e.kind === 'task') {
         this.screenFx('atlas_vfx_15', 'task');
       } else if (e.kind === 'milestone') {
@@ -859,14 +857,18 @@ export class SceneRenderer {
     }
     // 侦察范围
     const range = eng.w.attrs.get('scout.range');
-    if (eng.w.role(Role.Scout) > 0) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.32)';
+    if (eng.w.count(Bld.ScoutRoom) > 0) {
+      ctx.strokeStyle = 'rgba(103,216,255,0.72)';
       ctx.lineWidth = 1.5 / z;
       ctx.setLineDash([8 / z, 8 / z]);
       ctx.beginPath();
       ctx.arc(0, 0, range, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(18,67,82,0.9)';
+      ctx.font = font(11 / Math.max(0.7, z), true);
+      ctx.textAlign = 'center';
+      ctx.fillText(`侦察范围 ${Math.round(range)}`, 0, -range - 8 / z);
     }
     // 航线：普通 / 高产 / 危险 / 摇摆舞加成（虚线颜色 + 图集路线标记）
     eng.w.alloc.forEach((a: ForageAlloc) => {
@@ -1201,18 +1203,18 @@ export class SceneRenderer {
       const ly = f.y + R * 0.6 + 16;
       ctx.fillStyle = 'rgba(83,75,59,0.82)';
       ctx.fillText(label, f.x, ly);
-      // 保留原位置和宽度，仅增强绿色库存条与草地的对比。
+      // 使用高对比青蓝色，避免库存条与绿色草地融在一起。
       const bw = 40 * k;
       const bh = 6 * k;
       const barY = ly + 8 * k;
-      ctx.fillStyle = '#263D1D';
+      ctx.fillStyle = '#17344A';
       roundRect(ctx, f.x - bw / 2, barY, bw, bh, 2 * k);
       ctx.fill();
       ctx.strokeStyle = '#F4F5D6';
       ctx.lineWidth = k;
       ctx.stroke();
       if (ratio > 0) {
-        ctx.fillStyle = '#79E34B';
+        ctx.fillStyle = '#28C7FA';
         roundRect(ctx, f.x - bw / 2, barY, Math.max(k, bw * ratio), bh, 2 * k);
         ctx.fill();
       }
@@ -1231,7 +1233,7 @@ export class SceneRenderer {
         ctx.fillText(`${fd.name} · ${f.level}级`, f.x, by + 14 * k);
         ctx.fillStyle = '#806847';
         ctx.font = font(10 * k, false);
-        ctx.fillText(eng.map.recoveryRemaining(f) > 0 ? `恢复中 · ${Math.ceil(eng.map.recoveryRemaining(f))}秒` : `产出 ×${fd.yieldMul}  ·  存量 ${Math.floor(f.stock)}`, f.x, by + 31 * k);
+        ctx.fillText(eng.map.recoveryRemaining(f) > 0 ? `恢复中 · ${Math.ceil(eng.map.recoveryRemaining(f))}秒` : `品质 ×${(fd.yieldMul * eng.w.attrs.get('scout.quality')).toFixed(1)}  ·  存量 ${Math.floor(f.stock)}`, f.x, by + 31 * k);
         ctx.fillStyle = 'rgba(255,244,218,0.96)';
         ctx.beginPath();
         ctx.moveTo(f.x - 7 * k, by + bubbleH);

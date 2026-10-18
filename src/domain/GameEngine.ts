@@ -207,6 +207,10 @@ export class GameEngine {
     return this.done(this.hive.demolish(cellId));
   }
 
+  swapCells(fromId: string, toId: string): CmdResult {
+    return this.done(this.hive.swapCells(fromId, toId));
+  }
+
   upgrade(trackId: string): CmdResult {
     return this.done(this.hive.upgrade(trackId));
   }
@@ -327,6 +331,14 @@ export class GameEngine {
       const points = preview.total;
       this.prog.applySwarmToMeta(points, nextRegion);
       const meta = this.w.s.meta;
+      // 分蜂不再销毁原蜂群：保存完整运行态，之后可从侧边栏切回；离开期间按离线经营补算。
+      this.w.s.colonies.push({
+        id: this.w.s.activeColonyId,
+        name: `${this.w.region().name}蜂群`,
+        run: snapshotRun,
+        lastActiveAt: Date.now()
+      });
+      this.w.s.activeColonyId = `colony-${meta.swarmCount}`;
       this.w.refreshFlags();
       this.w.attrs.recompute();
       const startLarvae = Math.floor(this.w.attrs.get('start.larvae'));
@@ -340,7 +352,7 @@ export class GameEngine {
       this.w.refreshFlags();
       this.hive.recomputeAdjacency();
       this.w.attrs.recompute();
-      this.w.msg('swarm', `分蜂完成！获得 ${points} 传承点，蜂群抵达${this.w.region().name}。`);
+      this.w.msg('swarm', `分蜂完成！获得 ${points} 传承点，蜂群抵达${this.w.region().name}。原蜂群仍会经营，可在侧边栏“蜂群切换”中返回。`);
       this.w.emit('swarm', 0, 0, this.w.region().name, 'any');
       this.saveRequested = true;
       return CmdResult.ok(`获得 ${points} 传承点`);

@@ -2,12 +2,14 @@ package com.xiaofengdaye.game;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.pm.ActivityInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.JavascriptInterface;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
 import java.io.ByteArrayInputStream;
@@ -16,6 +18,12 @@ import java.io.ByteArrayInputStream;
 public final class MainActivity extends Activity {
     private static final String ORIGIN = "appassets.androidplatform.net";
     private WebView game;
+    private final class OrientationBridge {
+        @JavascriptInterface public void setOrientation(String value) {
+            runOnUiThread(() -> setRequestedOrientation("portrait".equals(value)
+                ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
+        }
+    }
     private void lifecycle(String event) {
         if (game != null) game.evaluateJavascript("window.dispatchEvent(new Event('" + event + "'))", null);
     }
@@ -41,6 +49,7 @@ public final class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setMediaPlaybackRequiresUserGesture(true);
         settings.setUserAgentString(settings.getUserAgentString() + " XiaofengdayeAndroid");
+        game.addJavascriptInterface(new OrientationBridge(), "XFNativeOrientation");
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();

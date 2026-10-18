@@ -6,6 +6,10 @@ import { UnavailableAds } from '../UnavailableAds';
 
 declare const __PRODUCTION__: boolean;
 
+interface OrientationBridge { setOrientation(value: string): void; }
+interface OrientationWindow extends Window { XFNativeOrientation?: OrientationBridge; }
+interface LockableOrientation extends ScreenOrientation { lock?: (value: string) => Promise<void>; }
+
 /** 浏览器 localStorage。每次调用时才读取全局对象，便于测试注入内存实现。 */
 class WebStorage implements KeyValueStore {
   probe(): boolean {
@@ -190,6 +194,18 @@ export class WebPlatform implements Platform {
 
   vibrate(ms: number): void {
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(ms);
+  }
+
+  async setOrientation(orientation: 'landscape' | 'portrait'): Promise<boolean> {
+    const bridge = (window as OrientationWindow).XFNativeOrientation;
+    if (bridge !== undefined) {
+      bridge.setOrientation(orientation);
+      return true;
+    }
+    const target = orientation === 'landscape' ? 'landscape-primary' : 'portrait-primary';
+    const api = screen.orientation as LockableOrientation;
+    if (typeof api?.lock !== 'function') return false;
+    try { await api.lock(target); return true; } catch { return false; }
   }
 
   perfNow(): number { return performance.now(); }

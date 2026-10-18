@@ -51,7 +51,7 @@ export class MapService {
       const take = Math.min(f.stock, this.w.attrs.get('manual.yield'));
       if (take <= 1e-6) break;
       f.stock = Math.max(0, f.stock - take);
-      gain += take * fd.yieldMul * Math.max(0.15, this.w.seasonDef().nectarMul);
+      gain += take * fd.yieldMul * this.w.attrs.get('scout.quality') * Math.max(0.15, this.w.seasonDef().nectarMul);
       collected++;
     }
     this.markDepleted(f);
@@ -250,7 +250,7 @@ export class MapService {
   /** 摇摆舞公开花田位置、花期、收益和危险（BEE-003） */
   publishDiscovery(fieldId: string): void {
     const f = this.w.field(fieldId);
-    if (f === null) {
+    if (f === null || (!f.home && f.dist > this.w.attrs.get('scout.range'))) {
       return;
     }
     const t = this.w.s.run.time;
@@ -410,7 +410,7 @@ export class MapService {
       const take = Math.min(want, f.stock);
       f.stock -= take;
       if (take > 0) this.markDepleted(f);
-      const nectar = take * fd.yieldMul * Math.max(0.05, season) * region.nectarMul;
+      const nectar = take * fd.yieldMul * this.w.attrs.get('scout.quality') * Math.max(0.05, season) * region.nectarMul;
       totalNectar += nectar;
       a.rate = dt > 0 ? nectar / dt : 0;
       jelly += take / carry * fd.jellyPerTrip;
@@ -554,7 +554,7 @@ export class MapService {
       const cap = (this.regen(f) * 1.1 + f.stock / 90) / Math.max(1e-6, perBee);
       const n = Math.min(cap, avail - used);
       used += n;
-      total += n * perBee * this.w.flower(f.flower).yieldMul * season * region.nectarMul;
+      total += n * perBee * this.w.flower(f.flower).yieldMul * this.w.attrs.get('scout.quality') * season * region.nectarMul;
     });
     return total;
   }

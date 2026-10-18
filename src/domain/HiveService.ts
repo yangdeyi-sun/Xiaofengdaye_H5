@@ -164,6 +164,22 @@ export class HiveService {
     return CmdResult.ok('已拆除');
   }
 
+  /** 在两个已解锁巢格之间交换建筑；空格也可作为目标，用于无损调整布局。 */
+  swapCells(fromId: string, toId: string): CmdResult {
+    const from = this.cell(fromId);
+    const to = this.cell(toId);
+    if (from === null || to === null || !from.unlocked || !to.unlocked) {
+      return CmdResult.fail('HIVE_CELL', '只能在已经扩建好的格子之间换位');
+    }
+    if (from.cellId === to.cellId) return CmdResult.fail('HIVE_CELL', '请选择另一个格子');
+    const building = from.building;
+    from.building = to.building;
+    to.building = building;
+    this.recomputeAdjacency();
+    this.w.emit('build', to.q, to.r, '布局已调整', 'hive');
+    return CmdResult.ok(to.building.length > 0 && from.building.length > 0 ? '两个巢房已换位' : '巢房已移动');
+  }
+
   trackLevel(id: string): number {
     const v = this.w.s.run.upgrades[id];
     return v === undefined ? 0 : v;
