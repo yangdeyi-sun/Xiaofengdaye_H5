@@ -331,6 +331,10 @@ export interface SwarmDef {
   minPollinations: number;
   basePoints: number;
   resourceBonusCap: number;
+  queenHoney: number;
+  queenWax: number;
+  queenJelly: number;
+  queenSuccessChance: number;
 }
 
 export interface GameConfigDef {

@@ -39,6 +39,37 @@ export class ColonyService {
     return this.w.econ.costOf(def.costs, this.w.role(role) + queued, this.w.attrs.get('nursery.costMul'), 20);
   }
 
+  queenCost(): CostAmount[] {
+    const sc = this.w.cfg.swarm;
+    return [
+      new CostAmount(Res.Honey, BigNum.of(sc.queenHoney)),
+      new CostAmount(Res.Wax, BigNum.of(sc.queenWax)),
+      new CostAmount(Res.Jelly, BigNum.of(sc.queenJelly))
+    ];
+  }
+
+  /** 分蜂蜂后培育：每次消耗固定储备，独立进行 25% 成功判定。 */
+  differentiateQueen(): CmdResult {
+    const colony = this.w.s.run.colony;
+    if (colony.youngQueens > 0) return CmdResult.fail('QUEEN_READY', '新蜂后已经准备好，可以发起分蜂');
+    const costs = this.queenCost();
+    if (!this.w.econ.canAfford(costs)) {
+      return CmdResult.fail('ECON_SHORT', '培育新蜂后需要1000蜂蜜、400蜂蜡和5蜂王浆');
+    }
+    if (!this.w.econ.spend(costs, Reason.Hatch, 'young-queen')) {
+      return CmdResult.fail('ECON_SHORT', '培育新蜂后的资源不足');
+    }
+    colony.queenAttempts += 1;
+    if (!this.w.rng.chance(this.w.cfg.swarm.queenSuccessChance)) {
+      this.w.msg('warn', '本次蜂后分化没有成功，投入的育王资源已经消耗。');
+      return CmdResult.fail('QUEEN_FAILED', '蜂后分化失败（成功率25%）');
+    }
+    colony.youngQueens += 1;
+    this.w.msg('milestone', '新蜂后分化成功！她已经可以带领一半蜂群和资源建立新巢。');
+    this.w.emit('milestone', 0, 0, '新蜂后诞生', 'hive');
+    return CmdResult.ok('新蜂后分化成功');
+  }
+
   roleAvailable(role: string): boolean {
     return this.w.count(this.w.roleDef(role).building) > 0;
   }

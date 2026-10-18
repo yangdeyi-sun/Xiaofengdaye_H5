@@ -245,7 +245,8 @@ export class ProgressionService {
   }
 
   researchCost(r: ResearchDef): CostAmount[] {
-    return this.w.econ.costOf(r.costs, this.researchLevel(r.id), 1);
+    return this.w.econ.costOf(r.costs, this.researchLevel(r.id),
+      Math.pow(2, Math.max(0, Math.min(30, this.w.s.run.regionIndex))));
   }
 
   research(id: string): CmdResult {
@@ -418,6 +419,7 @@ export class ProgressionService {
     p.conditions.push(new SwarmCondition('upgrades', '巢房升级总等级', upgrades, sc.upgradeLevels + n * 4));
     p.conditions.push(new SwarmCondition('honey', '蜂蜜储备', Math.floor(w.econ.num(Res.Honey)), Math.round(honeyTarget)));
     p.conditions.push(new SwarmCondition('jelly', '蜂王浆储备', Math.floor(w.econ.num(Res.Jelly)), sc.jelly));
+    p.conditions.push(new SwarmCondition('queen', '可带队的新蜂后', run.colony.youngQueens, 1));
     p.conditions.push(new SwarmCondition('fields', '已发现花田', discovered, sc.minFields));
     if (sc.minWinters > 0) {
       p.conditions.push(new SwarmCondition('winter', '度过冬季', run.season.wintersSurvived, sc.minWinters));
@@ -453,9 +455,9 @@ export class ProgressionService {
       total += s.points;
     });
     p.total = total;
-    p.resets = ['普通资源库存（花蜜、蜂蜜、蜂蜡、蜂王浆）', '当前蜂群与幼虫', '巢房建筑与属性等级', '当前种区研究',
-      '花田探索与季节状态'];
-    p.keeps = ['蜂王传承点与天赋', '花种与敌害图鉴', '成就、蜂巢外观与历史记录', '已完成的教学与已解锁的功能', '设置与服务卡片'];
+    p.resets = ['新蜂巢的建筑、属性等级与当前种区研究', '新蜂巢的花田探索与季节状态'];
+    p.keeps = ['原蜂巢及其另一半人口与资源', '新蜂后带走的一半人口与当前资源', '蜂王传承点与天赋',
+      '花种与敌害图鉴、成就、外观和设置'];
     return p;
   }
 

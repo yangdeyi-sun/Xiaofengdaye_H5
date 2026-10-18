@@ -21,7 +21,8 @@ public final class MainActivity extends Activity {
     private final class OrientationBridge {
         @JavascriptInterface public void setOrientation(String value) {
             runOnUiThread(() -> setRequestedOrientation("portrait".equals(value)
-                ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
+                ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT : ("landscape".equals(value)
+                    ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR)));
         }
     }
     private void lifecycle(String event) {

@@ -293,8 +293,11 @@ export class CanvasUI {
       e.w.cfg.research.forEach((r) => push(r.name, () => this.result(e.research(r.id)), r.desc, e.w.count(Bld.Evolution) > 0));
     } else if (this.panel === 'swarm') {
       const preview = e.swarmPreview();
+      if (e.run.colony.youngQueens > 0) push('新蜂后已准备好', undefined, '可带领一半人口与资源建立新巢');
+      else push('尝试分化新蜂后', () => this.ask('消耗1000蜂蜜、400蜂蜡、5蜂王浆，成功率25%，失败不返还。确认尝试？', () => this.result(e.differentiateQueen())),
+        '1000蜂蜜 · 400蜂蜡 · 5蜂王浆 · 25%成功', e.w.econ.canAfford(e.colony.queenCost()));
       preview.conditions.forEach((c) => push(`${c.met ? '已达成' : '未达成'} ${c.label}`, undefined, `${Math.floor(c.current)}/${c.target}`));
-      e.w.cfg.regions.forEach((r) => push(`分蜂前往${r.name}`, () => this.ask('分蜂将重置本轮建筑、资源和蜂群，保留永久传承。确认出发？', () => { this.result(e.swarm(r.id)); s.saveNow(); }), `可得${preview.total}传承点`, preview.ready));
+      e.w.cfg.regions.filter((r) => r.id !== e.run.regionId).forEach((r) => push(`分蜂前往${r.name}`, () => this.ask('新蜂后会带走一半人口和当前资源；新巢建设、升级成本为上一代2倍。确认出发？', () => { this.result(e.swarm(r.id)); s.saveNow(); }), `可得${preview.total}传承点`, preview.ready));
     } else if (this.panel === 'talents') {
       push(`可用传承点 ${e.state.meta.inheritance.available}`);
       e.w.cfg.talents.forEach((t) => push(t.name, () => this.result(e.investTalent(t.id)), t.desc));

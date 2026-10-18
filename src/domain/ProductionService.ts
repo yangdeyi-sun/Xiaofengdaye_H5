@@ -119,8 +119,7 @@ export class SeasonService {
   }
 
   duration(id: string): number {
-    const m = this.w.region().seasonMul[id];
-    return this.def(id).duration * (m === undefined ? 1 : m);
+    return this.w.seasonDuration(id);
   }
 
   remaining(): number {
@@ -151,6 +150,15 @@ export class SeasonService {
       return;
     }
     const t = this.w.s.run.time;
+    const known = this.w.cfg.seasons.some((season: SeasonDef) => season.id === s.season);
+    if (!known || !Number.isFinite(s.startedAt) || !Number.isFinite(s.endsAt) || s.endsAt < s.startedAt) {
+      s.season = SeasonId.Spring;
+      s.startedAt = t;
+      s.endsAt = t + this.duration(SeasonId.Spring);
+      s.starving = false;
+      s.starveSeconds = 0;
+      this.w.msg('warn', '季节进度异常已自动修复，当前恢复为春季。');
+    }
     let guard = 0;
     while (t >= s.endsAt && guard < 12) {
       guard++;
@@ -158,8 +166,10 @@ export class SeasonService {
       let to = this.def(from).next;
       // 开局前 30 分钟为引导期，不进入真正冬季
       if (to === SeasonId.WinterPrep && this.w.s.meta.totalPlayTime < 1800 && this.w.s.meta.swarmCount === 0) {
-        s.endsAt = s.endsAt + Math.min(120, 1800 - this.w.s.meta.totalPlayTime);
-        continue;
+        // 以“剩余在线新手时长”确定唯一截止点。旧实现会在部分设备的大时间步/离线补算中反复顺延，
+        // 导致永远无法进入冬季准备阶段。
+        s.endsAt = t + Math.max(0.1, 1800 - this.w.s.meta.totalPlayTime);
+        break;
       }
       if (from === SeasonId.Winter) {
         s.wintersSurvived += 1;

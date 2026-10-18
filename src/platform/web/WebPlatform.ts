@@ -196,14 +196,17 @@ export class WebPlatform implements Platform {
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(ms);
   }
 
-  async setOrientation(orientation: 'landscape' | 'portrait'): Promise<boolean> {
+  async setOrientation(orientation: 'auto' | 'landscape' | 'portrait'): Promise<boolean> {
     const bridge = (window as OrientationWindow).XFNativeOrientation;
     if (bridge !== undefined) {
       bridge.setOrientation(orientation);
       return true;
     }
-    const target = orientation === 'landscape' ? 'landscape-primary' : 'portrait-primary';
     const api = screen.orientation as LockableOrientation;
+    if (orientation === 'auto') {
+      try { api?.unlock?.(); return true; } catch { return false; }
+    }
+    const target = orientation === 'landscape' ? 'landscape-primary' : 'portrait-primary';
     if (typeof api?.lock !== 'function') return false;
     try { await api.lock(target); return true; } catch { return false; }
   }

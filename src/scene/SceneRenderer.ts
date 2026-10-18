@@ -131,6 +131,9 @@ export class SceneRenderer {
   private hexSize: number = 30;
   private hexCx: number = 0;
   private hexCy: number = 0;
+  private hiveZoom: number = 1;
+  private hivePanX: number = 0;
+  private hivePanY: number = 0;
   private fieldShownAt: number = -10;
   private hiveShownAt: number = -10;
   private cueAt: Map<string, number> = new Map<string, number>();
@@ -672,6 +675,18 @@ export class SceneRenderer {
     this.cam.zoom = Math.max(0.25, Math.min(2.5, this.cam.zoom * f));
   }
 
+  /** 蜂巢视图支持双指/滚轮缩放；上下限避免巢格小到无法点击或无限放大。 */
+  zoomHiveBy(f: number): void {
+    this.hiveZoom = Math.max(0.7, Math.min(1.8, this.hiveZoom * f));
+    if (this.hiveZoom <= 0.72) { this.hivePanX = 0; this.hivePanY = 0; }
+  }
+
+  panHive(dx: number, dy: number): void {
+    const limit = 320 * this.hiveZoom;
+    this.hivePanX = Math.max(-limit, Math.min(limit, this.hivePanX + dx));
+    this.hivePanY = Math.max(-limit, Math.min(limit, this.hivePanY + dy));
+  }
+
   /** 双击：以点击处为中心放大一档；已经放大时平滑回到默认视野 */
   doubleTapZoom(sx: number, sy: number, w: number, h: number): void {
     const base = Math.max(0.35, Math.min(1.4, Math.min(w, h) / 420));
@@ -1184,8 +1199,20 @@ export class SceneRenderer {
       const a = eng.w.alloc.find((x: ForageAlloc) => x.fieldId === f.fieldId);
       const guarded = eng.threats.guardsByArea['fields'] !== undefined && eng.threats.guardsByArea['fields'] > 0;
       const wa = guarded ? 'damaged' : (a !== undefined && a.bees > 0 ? 'trapped' : 'weave');
-      if (!Sprites.draw(ctx, 'atlas_enemies_web', wa, t, f.x + R * 0.45, f.y - R * 0.35, 40, wo)) {
-        drawWeb(ctx, f.x + R * 0.4, f.y - R * 0.3, 18);
+      const wx = f.x + R * 0.45;
+      const wy = f.y - R * 0.35;
+      if (!Sprites.draw(ctx, 'atlas_enemies_web', wa, t, wx, wy, 40, wo)) {
+        drawWeb(ctx, wx, wy, 18);
+      }
+      if (guarded) {
+        for (let i = 0; i < 2; i++) {
+          const ga = t * 2.4 + i * Math.PI;
+          wo.flip = Math.cos(ga) > 0;
+          Sprites.draw(ctx, 'atlas_bees_guard', 'attack', t + i * 0.3,
+            wx + Math.cos(ga) * 28, wy + Math.sin(ga) * 16, 18, wo);
+        }
+        const co = new DrawOpts(); co.full = true;
+        Sprites.draw(ctx, 'atlas_combat', Math.floor(t * 3) % 2 === 0 ? 'impact' : 'dash', t, wx, wy, 34, co);
       }
     }
     if (!valid && !f.home) {
@@ -1371,6 +1398,18 @@ export class SceneRenderer {
           po.full = true;
           Sprites.draw(ctx, 'atlas_combat', Math.floor(t * 2) % 2 === 0 ? 'impact' : 'hurt', t, p[0] - 20, p[1] - 10, 40,
             po);
+          const activeGuards = eng.w.active(Role.Guard);
+          const guards = activeGuards > 0 ? Math.min(4, Math.max(1, Math.ceil(activeGuards / 4))) : 0;
+          for (let i = 0; i < guards; i++) {
+            const a = -0.8 + i * 0.45 + Math.sin(t * 3 + i) * 0.12;
+            const gx = p[0] - 32 + Math.cos(a) * 18;
+            const gy = p[1] + 8 + Math.sin(a) * 24;
+            o.flip = false;
+            if (!Sprites.draw(ctx, 'atlas_bees_guard', Math.floor(t * 3 + i) % 2 === 0 ? 'attack' : 'dash',
+              t + i * 0.2, gx, gy, 18, o)) {
+              drawBee(ctx, gx, gy, 1, a, t * 45 + i, 'guard', false, true);
+            }
+          }
         }
       }
     });
@@ -1526,9 +1565,10 @@ export class SceneRenderer {
     // 顶部信息栏占用的高度不放巢格，避免外圈被资源栏、提示行挡住
     const top = Math.max(0, Math.min(this.hudTop, h * 0.45));
     const avail = Math.max(120, h - top - 12);
-    this.hexSize = Math.max(14, Math.min(w / (span * SQRT3 + 0.4), avail / (span * 1.5 + 1.2)) * 0.98);
-    this.hexCx = w / 2;
-    this.hexCy = top + avail / 2 + this.hexSize * 0.2;
+    const fitted = Math.max(14, Math.min(w / (span * SQRT3 + 0.4), avail / (span * 1.5 + 1.2)) * 0.98);
+    this.hexSize = fitted * this.hiveZoom;
+    this.hexCx = w / 2 + this.hivePanX;
+    this.hexCy = top + avail / 2 + this.hexSize * 0.2 + this.hivePanY;
   }
 
   cellX(c: HexCell): number {
@@ -1863,6 +1903,17 @@ export class SceneRenderer {
         mo)) {
         drawMoth(ctx, mx, my, S / 16, t * 10);
       }
+      const defending = eng.threats.guardsByArea['gate'] !== undefined && eng.threats.guardsByArea['gate'] > 0;
+      if (defending) {
+        for (let i = 0; i < 2; i++) {
+          const a = -t * 2.8 + i * Math.PI;
+          mo.flip = Math.cos(a) > 0;
+          Sprites.draw(ctx, 'atlas_bees_guard', 'attack', t + i * 0.25,
+            mx + Math.cos(a) * S * 0.75, my + Math.sin(a) * S * 0.45, S * 0.42, mo);
+        }
+        const co = new DrawOpts(); co.full = true;
+        Sprites.draw(ctx, 'atlas_combat', Math.floor(t * 3) % 2 === 0 ? 'impact' : 'shield', t, mx, my, S * 0.9, co);
+      }
     }
     // 熊
     const bear = eng.threats.pendingBear();
@@ -1874,6 +1925,19 @@ export class SceneRenderer {
       const anim = bear.phase === 'warning' ? 'warning' : 'swipe';
       if (!Sprites.draw(ctx, 'atlas_enemies_bear', anim, t, bx, by, S * 2.2, bo)) {
         drawBear(ctx, bx, by - S * 1.2, S / 22, t);
+      }
+      if (bear.phase === 'active' && eng.w.active(Role.Guard) > 0) {
+        const count = Math.min(3, Math.max(1, Math.ceil(eng.w.active(Role.Guard) / 4)));
+        for (let i = 0; i < count; i++) {
+          const gx = bx - S * (1.2 + i * 0.45);
+          const gy = by - S * (0.6 + (i % 2) * 0.35);
+          bo.flip = false;
+          Sprites.draw(ctx, 'atlas_bees_guard', Math.floor(t * 3 + i) % 2 === 0 ? 'attack' : 'dash',
+            t + i * 0.2, gx, gy, S * 0.45, bo);
+        }
+        const co = new DrawOpts(); co.full = true;
+        Sprites.draw(ctx, 'atlas_combat', Math.floor(t * 2) % 2 === 0 ? 'impact' : 'shield', t,
+          bx - S * 0.9, by - S * 0.8, S * 0.9, co);
       }
       ctx.fillStyle = 'rgba(200,40,30,0.95)';
       ctx.font = font(13, true);

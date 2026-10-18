@@ -378,7 +378,7 @@ const TUTORIAL: TutorialStepDef[] = [
 ];
 
 export const DEFAULT_CONFIG: GameConfigDef = {
-  configVersion: '0.1.0-cfg10',
+  configVersion: '0.1.0-cfg11',
   schemaVersion: 3,
   economy: {
     manualYield: 2,
@@ -448,7 +448,11 @@ export const DEFAULT_CONFIG: GameConfigDef = {
     minWinters: 0,
     minPollinations: 0,
     basePoints: 5,
-    resourceBonusCap: 0.2
+    resourceBonusCap: 0.2,
+    queenHoney: 1000,
+    queenWax: 400,
+    queenJelly: 5,
+    queenSuccessChance: 0.25
   }
 };
 
@@ -501,6 +505,10 @@ export function validateConfig(cfg: GameConfigDef): string[] {
   });
   if (cfg.regions.length === 0) {
     errs.push('no regions');
+  }
+  if (cfg.swarm.queenHoney <= 0 || cfg.swarm.queenWax <= 0 || cfg.swarm.queenJelly <= 0 ||
+    cfg.swarm.queenSuccessChance <= 0 || cfg.swarm.queenSuccessChance > 1) {
+    errs.push('swarm queen settings invalid');
   }
   return errs;
 }

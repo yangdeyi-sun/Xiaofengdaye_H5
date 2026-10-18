@@ -538,6 +538,12 @@ export class World {
     return this.cfg.seasons[0];
   }
 
+  seasonDuration(id: string): number {
+    const def = this.cfg.seasons.find((season: SeasonDef) => season.id === id) ?? this.cfg.seasons[0];
+    const mul = this.region().seasonMul[id];
+    return def.duration * (mul === undefined ? 1 : mul);
+  }
+
   isWinter(): boolean {
     return this.s.run.season.season === SeasonId.Winter;
   }

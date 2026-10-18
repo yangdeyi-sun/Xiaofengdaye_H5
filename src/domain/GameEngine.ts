@@ -1,7 +1,7 @@
 import { BigNum } from '../common/BigNum';
 import { Rng, hashSeed } from '../common/Rng';
 import { GameConfigDef, KeyLevelDef, Res, Role, SeasonId, StatDef, ALL_RES, ALL_ROLES } from './Types';
-import { GameState, OfflineReport, RunState } from './State';
+import { GameState, LarvaBatch, OfflineReport, RunState } from './State';
 import { CmdResult, CostAmount, Rates, World } from './World';
 import { HiveService } from './HiveService';
 import { ColonyService } from './ColonyService';
@@ -140,13 +140,38 @@ export class GameEngine {
     this.prog.newlyDone = [];
     this.prog.checkAchievements();
     this.prog.tutorialTick();
+    this.hive.ensureFallDeadline();
+    if (this.run.hive.fallAt > 0 && this.run.time >= this.run.hive.fallAt) {
+      this.dropOvergrownHive();
+      return;
+    }
     if (this.w.unlocked('t_build_storage') && this.w.count('storage') > 0 && !this.run.season.formal) {
       this.season.startFormal();
     }
-    // 第一只守卫蜂孵化后才开放敌害，玩家首次遇敌时一定已经具备反制手段。
-    if (this.w.role('guard') > 0 && !this.run.threats.enabled) {
+    // 玩家建成第一个功能建筑后开放低频、非致命敌害；新手结束后由敌害服务提高频率。
+    const hasFirstBuilding = this.run.hive.cells.some((cell) => cell.building.length > 0 && cell.building !== 'queen');
+    if (hasFirstBuilding && !this.run.threats.enabled) {
       this.threats.enable();
     }
+  }
+
+  /** 蜂巢达到扩建上限却未及时分蜂：当前蜂群坠落，本蜂群从零重建。 */
+  private dropOvergrownHive(): void {
+    const old = this.run;
+    const seed = hashSeed(`${this.state.meta.playerId}:fall:${old.regionId}:${old.regionIndex}:${old.time}`);
+    const fresh = createRun(this.w.cfg, old.regionId, old.regionIndex, seed, 0);
+    ALL_RES.forEach((res: string) => { fresh.res[res] = BigNum.zero(); });
+    this.w.s.run = fresh;
+    this.w.rng = new Rng(fresh.rngState);
+    this.hive.reindex();
+    this.w.alloc = [];
+    this.w.fieldEff = {};
+    this.w.refreshFlags();
+    this.hive.recomputeAdjacency();
+    this.w.attrs.recompute();
+    this.w.msg('error', '蜂巢超过承重期限后坠落损毁，当前蜂群的资源、人口和建设已从零开始。');
+    this.w.emit('fail', 0, 0, '蜂巢坠落', 'hive');
+    this.saveRequested = true;
   }
 
   private onTaskDone(id: string): void {
@@ -189,6 +214,10 @@ export class GameEngine {
 
   differentiate(role: string, count: number): CmdResult {
     return this.done(this.colony.differentiate(role, Math.max(1, Math.min(50, Math.floor(count)))));
+  }
+
+  differentiateQueen(): CmdResult {
+    return this.done(this.colony.differentiateQueen());
   }
 
   cancelBatch(id: number): CmdResult {
@@ -331,7 +360,37 @@ export class GameEngine {
       const points = preview.total;
       this.prog.applySwarmToMeta(points, nextRegion);
       const meta = this.w.s.meta;
-      // 分蜂不再销毁原蜂群：保存完整运行态，之后可从侧边栏切回；离开期间按离线经营补算。
+      // 新蜂后带走一半幼虫、成年蜂和当前库存；旧蜂群保留另一半与原有建设。
+      const carriedRes: Record<string, BigNum> = {};
+      const carriedOverflow: Record<string, BigNum> = {};
+      ALL_RES.forEach((res: string) => {
+        carriedRes[res] = snapshotRun.res[res].mulN(0.5);
+        snapshotRun.res[res] = snapshotRun.res[res].sub(carriedRes[res]).clamp0();
+        carriedOverflow[res] = snapshotRun.overflow[res].mulN(0.5);
+        snapshotRun.overflow[res] = snapshotRun.overflow[res].sub(carriedOverflow[res]).clamp0();
+      });
+      const carriedRoles: Record<string, number> = {};
+      const carriedInjured: Record<string, number> = {};
+      ALL_ROLES.forEach((role: string) => {
+        carriedRoles[role] = Math.floor(snapshotRun.colony.roles[role] * 0.5);
+        snapshotRun.colony.roles[role] -= carriedRoles[role];
+        carriedInjured[role] = Math.min(carriedRoles[role], Math.floor(snapshotRun.colony.injured[role] * 0.5));
+        snapshotRun.colony.injured[role] -= carriedInjured[role];
+      });
+      const carriedLarvae = Math.floor(snapshotRun.colony.larvae * 0.5);
+      snapshotRun.colony.larvae -= carriedLarvae;
+      const carriedBatches: LarvaBatch[] = [];
+      snapshotRun.colony.batches.forEach((batch: LarvaBatch) => {
+        const count = Math.floor(batch.count * 0.5);
+        if (count <= 0) return;
+        batch.count -= count;
+        carriedBatches.push({
+          ...batch, batchId: carriedBatches.length + 1, count,
+          startAt: Math.max(0, batch.startAt - snapshotRun.time),
+          finishAt: Math.max(0, batch.finishAt - snapshotRun.time)
+        });
+      });
+      snapshotRun.colony.youngQueens = Math.max(0, snapshotRun.colony.youngQueens - 1);
       this.w.s.colonies.push({
         id: this.w.s.activeColonyId,
         name: `${this.w.region().name}蜂群`,
@@ -344,6 +403,19 @@ export class GameEngine {
       const startLarvae = Math.floor(this.w.attrs.get('start.larvae'));
       const seed = hashSeed(`${meta.playerId}:${meta.swarmCount}:${nextRegion}`);
       const run = createRun(this.w.cfg, nextRegion, snapshotRun.regionIndex + 1, seed, startLarvae);
+      ALL_RES.forEach((res: string) => {
+        run.res[res] = carriedRes[res];
+        run.overflow[res] = carriedOverflow[res];
+      });
+      ALL_ROLES.forEach((role: string) => {
+        run.colony.roles[role] = carriedRoles[role];
+        run.colony.injured[role] = carriedInjured[role];
+      });
+      run.colony.larvae += carriedLarvae;
+      run.colony.batches = carriedBatches;
+      run.colony.nextBatchId = carriedBatches.length + 1;
+      run.colony.hatched = Object.values(carriedRoles).reduce((sum, value) => sum + value, 0);
+      run.stats.peakPop = run.colony.hatched;
       this.w.s.run = run;
       this.w.rng = new Rng(run.rngState);
       this.hive.reindex();
@@ -352,7 +424,7 @@ export class GameEngine {
       this.w.refreshFlags();
       this.hive.recomputeAdjacency();
       this.w.attrs.recompute();
-      this.w.msg('swarm', `分蜂完成！获得 ${points} 传承点，蜂群抵达${this.w.region().name}。原蜂群仍会经营，可在侧边栏“蜂群切换”中返回。`);
+      this.w.msg('swarm', `分蜂完成！新蜂后带领一半蜂群和资源抵达${this.w.region().name}，获得 ${points} 传承点。新巢建设与升级成本为上一代的2倍。`);
       this.w.emit('swarm', 0, 0, this.w.region().name, 'any');
       this.saveRequested = true;
       return CmdResult.ok(`获得 ${points} 传承点`);

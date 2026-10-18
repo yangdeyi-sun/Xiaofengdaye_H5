@@ -399,9 +399,11 @@ export class BrowserUI {
     // 阻止触屏在 touchend 后补发的 click：它会落到刚打开的面板遮罩上，把面板立刻关掉
     this.canvas.addEventListener('touchend', (event) => { if (event.cancelable) event.preventDefault(); }, { passive: false });
     this.canvas.addEventListener('wheel', (event) => {
-      if (this.view !== 'field' || this.session.renderer === null) return;
+      if (this.session.renderer === null) return;
       event.preventDefault();
-      this.session.renderer.zoomBy(Math.exp(-event.deltaY * 0.0012));
+      const factor = Math.exp(-event.deltaY * 0.0012);
+      if (this.view === 'field') this.session.renderer.zoomBy(factor);
+      else this.session.renderer.zoomHiveBy(factor);
     }, { passive: false });
     this.resizeObserver = new ResizeObserver(() => this.resizeCanvas());
     this.resizeObserver.observe(this.canvas);
@@ -504,10 +506,13 @@ export class BrowserUI {
     event.preventDefault();
     const point = this.canvasPoint(event);
     this.pointers.set(event.pointerId, point);
-    if (this.pointers.size >= 2 && this.view === 'field') {
+    if (this.pointers.size >= 2) {
       const points = [...this.pointers.values()];
       const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
-      if (this.pinchDistance > 0) renderer.zoomBy(distance / this.pinchDistance);
+      if (this.pinchDistance > 0) {
+        if (this.view === 'field') renderer.zoomBy(distance / this.pinchDistance);
+        else renderer.zoomHiveBy(distance / this.pinchDistance);
+      }
       this.pinchDistance = distance; this.dragging = true; this.multiTouch = true; this.holdField = '';
       return;
     }
@@ -518,7 +523,10 @@ export class BrowserUI {
       this.dragging = true;
       this.holdField = '';
     }
-    if (this.dragging && this.view === 'field') renderer.pan(dx, dy);
+    if (this.dragging) {
+      if (this.view === 'field') renderer.pan(dx, dy);
+      else renderer.panHive(dx, dy);
+    }
     this.lastX = point.x; this.lastY = point.y;
   }
 
@@ -887,9 +895,12 @@ export class BrowserUI {
     const e = this.engine();
     const season = e.run.season;
     const threats = e.threats.activeList().length;
+    const hiveFull = e.hive.isAtCapacity() && e.run.hive.fallAt > 0;
     const winterRisk = season.formal && [SeasonId.Autumn, SeasonId.WinterPrep].includes(season.season as SeasonId) &&
       e.w.econ.num(Res.Honey) < e.season.winterNeed();
-    const alert = threats > 0
+    const alert = hiveFull
+      ? `<button class="status-alert" data-action="open-panel" data-id="swarm" title="蜂巢已达上限，必须及时分蜂">${icon('xf_nav_split')}<b>!</b></button>`
+      : threats > 0
       ? `<button class="status-alert" data-action="open-panel" data-id="eco">${icon('xf_threat_danger')}<b>${threats}</b></button>`
       : (season.starving || winterRisk
         ? `<button class="status-alert" data-action="open-panel" data-id="eco">${icon(season.starving ? 'xf_status_insufficient' : 'xf_season_winter_prep')}</button>` : '');
@@ -1293,9 +1304,9 @@ export class BrowserUI {
       return panelCard(`<div class="card-head">${icon(threatIcon(event.type))}<div><h3>${h(def.name)} @ ${h(where)}</h3><p>${h(phase)} · 剩余 ${Math.max(0, Math.ceil(event.hp))}/${Math.ceil(event.maxHp)}</p><small>${h(def.desc)}</small></div></div>${bearActions}`, true);
     }).join('');
     const injured = e.w.injured(Role.Forager) + e.w.injured(Role.House);
-    let threatSection = '<p class="muted">第一只守卫蜂孵化后，胡蜂、蜘蛛网和蜡螟会开始出现。</p>';
+    let threatSection = '<p class="muted">建成第一个功能建筑后，敌害会开始低频出现；新手阶段结束后频率和强度都会提高。</p>';
     if (e.run.threats.enabled) {
-      threatSection = `<h3 class="section-title">${icon('xf_status_danger')} 敌害</h3><p>${h(guardLine)}</p>${threats.length > 1 ? `<p class="warning">同时存在 ${threats.length} 个敌害，守卫会分区，单个目标获得的攻击力下降。</p>` : ''}${injured > 0 ? `<p class="muted">${icon('xf_status_injured')} 受伤休养中的工蜂 ${injured} 只，会逐渐恢复。</p>` : ''}${threats.length === 0 ? `${artImage('state_no_threats', '没有威胁', 'empty-art')}<p class="ok">目前没有威胁</p>` : threatCards}<p class="muted">敌害在第一只守卫蜂孵化后开放；离线期间不会发生熊袭击与毁巢。</p>`;
+      threatSection = `<h3 class="section-title">${icon('xf_status_danger')} 敌害</h3><p>${h(guardLine)}</p>${threats.length > 1 ? `<p class="warning">同时存在 ${threats.length} 个敌害，守卫会分区，单个目标获得的攻击力下降。</p>` : ''}${injured > 0 ? `<p class="muted">${icon('xf_status_injured')} 受伤休养中的工蜂 ${injured} 只，会逐渐恢复。</p>` : ''}${threats.length === 0 ? `${artImage('state_no_threats', '没有威胁', 'empty-art')}<p class="ok">目前没有威胁</p>` : threatCards}<p class="muted">首个建筑后为低频、非致命侵扰；新手结束后高频出现，并随四季轮回增强。离线期间不会生成新敌害或发生熊袭击。</p>`;
     }
     const starving = season.starving ? `<p class="warning">${icon('xf_status_stopped')} ${season.starveSeconds >= 150 ? '严重饥饿：蜂群正在缓慢减员' : (season.starveSeconds >= 60 ? '持续饥饿：产卵与孵化受限' : '部分蜜蜂因缺蜜暂停工作')}</p>` : '';
     return this.panelFrame('四季与防御', 'xf_nav_ecology', `<div class="heading-line">${icon(seasonIcon(season.season))}<h3>${h(seasonLine)}</h3></div>${effects.map((line) => `<p>${h(line)}</p>`).join('')}${starving}${supply}${collapsed}<hr>${threatSection}`);
@@ -1343,7 +1354,13 @@ export class BrowserUI {
     const regionCards = regions.map((region) => `<button type="button" class="region-card${this.swarmTarget === region.id ? ' selected' : ''}" data-action="swarm-target" data-id="${h(region.id)}">${artImage(`region_${regionArt(region.id)}`, region.name)}<span><b>${h(region.name)}</b><em>难度 ${'★'.repeat(region.difficulty + 1)}</em><small>${h(region.desc)}</small><small>${h(region.rule)}</small></span></button>`).join('');
     const illustration = e.state.meta.swarmCount > 0 && e.run.time < 300 ? 'illustration_split_arrive'
       : (preview.ready ? 'illustration_split_depart' : 'illustration_split_prepare');
-    return this.panelFrame('分蜂迁徙', 'xf_nav_split', `${artImage(illustration, '分蜂迁徙', 'wide-art')}<p class="muted">老蜂后带领蜂群离巢，前往新的种区。本轮进度重置，换取永久的蜂王传承点。</p><h3 class="section-title">分蜂条件</h3>${conditions}<hr><h3 class="section-title">预计获得传承点 ${preview.total}</h3>${sources}<hr><div class="two-column"><div><h3>将会重置</h3><ul class="reset-list">${preview.resets.map((item) => `<li>${h(item)}</li>`).join('')}</ul></div><div><h3>永久保留</h3><ul class="keep-list">${preview.keeps.map((item) => `<li>${h(item)}</li>`).join('')}</ul></div></div><hr><h3 class="section-title">选择新种区</h3>${regionCards}${button('confirm-swarm', '发起分蜂', { primary: true, disabled: !preview.ready || this.swarmTarget.length === 0 })}`);
+    const queenReady = e.run.colony.youngQueens > 0;
+    const queenCost = e.colony.queenCost();
+    const queenCard = panelCard(`<div class="heading-line">${icon('xf_building_queen')}<h3>培育新蜂后</h3>${queenReady ? icon('xf_status_complete') : ''}</div><p>${queenReady ? '新蜂后已经准备好，可以带领分蜂。' : `每次投入 ${h(costStr(queenCost))}，有 ${Math.round(e.w.cfg.swarm.queenSuccessChance * 100)}% 概率成功。失败也会消耗资源。`}</p>${queenReady ? '' : button('rear-queen', '尝试分化蜂后', { primary: true, disabled: !e.w.econ.canAfford(queenCost) })}`);
+    const fallWarning = e.run.hive.fallAt > 0
+      ? `<p class="warning">${icon('xf_status_danger')} 蜂巢已达扩建上限，预计最迟 ${formatDuration(e.hive.fallRemaining())} 内掉落。请在掉落前完成分蜂。</p>` : '';
+    const costMul = e.hive.constructionCostMul() * 2;
+    return this.panelFrame('分蜂迁徙', 'xf_nav_split', `${artImage(illustration, '分蜂迁徙', 'wide-art')}${fallWarning}<p class="muted">新蜂后会带走当前一半人口和资源建立新巢；原蜂巢保留另一半。新巢建筑、扩建、升级与研究成本为本巢的2倍（下一巢倍率 ×${costMul}）。</p>${queenCard}<h3 class="section-title">分蜂条件</h3>${conditions}<hr><h3 class="section-title">预计获得传承点 ${preview.total}</h3>${sources}<hr><div class="two-column"><div><h3>新巢重建</h3><ul class="reset-list">${preview.resets.map((item) => `<li>${h(item)}</li>`).join('')}</ul></div><div><h3>共同保留</h3><ul class="keep-list">${preview.keeps.map((item) => `<li>${h(item)}</li>`).join('')}</ul></div></div><hr><h3 class="section-title">选择新种区</h3>${regionCards}${button('confirm-swarm', '发起分蜂', { primary: true, disabled: !preview.ready || this.swarmTarget.length === 0 })}`);
   }
 
   private renderColoniesPanel(): string {
@@ -1474,7 +1491,7 @@ export class BrowserUI {
       `<div class="setting-row">${icon(rowIcon)}<span><b>${h(label)}</b>${desc.length > 0 ? `<small>${h(desc)}</small>` : ''}</span>${this.toggleButton(key, on)}</div>`;
     const skins = e.w.cfg.skins.filter((skin: SkinDef) => e.state.meta.skins.includes(skin.id)).map((skin) =>
       `<button type="button" class="skin-choice${settings.skin === skin.id ? ' selected' : ''}" data-action="set-skin" data-id="${h(skin.id)}">${artImage(`skin_background_${skin.id}`, skin.name)}<span>${h(skin.name)}</span></button>`).join('');
-    const orientation = `<div class="setting-row">${icon('xf_action_refresh')}<span><b>固定屏幕方向</b><small>锁定后晃动手机不会在横竖屏之间跳转</small></span><div class="choice-row">${button('set-orientation', '横屏', { id: 'landscape', primary: settings.orientation === 'landscape' })}${button('set-orientation', '竖屏', { id: 'portrait', primary: settings.orientation === 'portrait' })}</div></div>`;
+    const orientation = `<div class="setting-row">${icon('xf_action_refresh')}<span><b>屏幕方向</b><small>自动跟随手机姿态：横握显示横屏，竖握显示竖屏</small></span><b class="ok">自动</b></div>`;
     return this.panelFrame('设置', 'xf_nav_settings', `<h3 class="section-title">音画</h3>${orientation}${toggleRow('music', '背景音乐', '', settings.music, 'xf_action_music')}${toggleRow('sfx', '音效', '', settings.sfx, 'xf_action_sound')}${this.range('volume', 'musicVolume', settings.musicVolume, 0, 100, 5, `音乐音量 ${settings.musicVolume}%`)}${this.range('volume', 'effectsVolume', settings.effectsVolume, 0, 100, 5, `音效音量 ${settings.effectsVolume}%`)}${toggleRow('vibration', '振动', '浏览器和设备支持时使用', settings.vibration, 'xf_action_vibration')}${toggleRow('particles', '粒子特效', '关闭可降低功耗', settings.particles, 'xf_status_rare')}${toggleRow('reduceMotion', '减少动态效果', '降低动画速度与天气粒子', settings.reduceMotion, 'xf_action_pause')}${toggleRow('eventAnimations', '事件动画', '敌害与季节更替的非阻塞通告', settings.eventAnimations, 'xf_card_alarm')}${toggleRow('lowPower', '省电模式', '画面降为 30 帧、使用半尺寸美术', this.session.lowPower, 'xf_action_low_power')}<hr><h3 class="section-title">玩法</h3><div class="setting-row"><span><b>花潮加速</b><small>${this.session.ads.boostSpeed() > 1 ? `${this.session.ads.boostSpeed()}× 进行中，剩余 ${clock(this.session.ads.boostRemainingSec())}` : `看 1 个广告 2×，看 2 个广告 4×，持续 ${AD_REWARDS.boostMinutes} 分钟`}</small></span>${button('open-boost', '⚡ 加速')}</div>${toggleRow('ecoMode', '生态模式（工蜂寿命）', '开启后工蜂会自然老化，需要手动孵化并分化补员', settings.ecoMode, 'xf_nav_ecology')}<h3 class="section-title">蜂巢外观</h3><div class="skin-grid">${skins}</div><hr><h3 class="section-title">${icon('xf_action_help')} 帮助与说明</h3><div class="choice-row">${button('open-legal', '玩法帮助', { id: 'help' })}${button('open-legal', '隐私政策', { id: 'privacy' })}${button('open-legal', '用户协议', { id: 'agreement' })}</div><hr><h3 class="section-title">数据与隐私</h3><p class="muted">进度保存在本设备。清除进度会重新开始；删除全部数据会同时清除设置与隐私同意记录。</p><div class="choice-row">${button('confirm-reset-progress', '清除游戏进度', { danger: true })}${button('confirm-delete-all', `${icon('xf_action_delete')} 删除全部数据`, { danger: true })}</div><div class="about-row">${artImage('logo_mark', '小峰大业')}${artImage('app_icon', '应用图标')}<span><b>小峰大业</b><small>版本 0.5.1</small></span>${button('save-now', `${icon('xf_status_save')} 立即保存`)}</div><div class="choice-row home-row">${button('exit-home', `${icon('xf_action_back')} 保存并返回首页`)}</div>`);
   }
 
@@ -1607,6 +1624,12 @@ export class BrowserUI {
       case 'enter-hive': this.view = 'hive'; this.placing = ''; this.closePanel(false); this.refreshGame(true); this.writeHistory(false); return;
       case 'lay': this.feedback(e.lay()); break;
       case 'hatch': this.feedback(e.differentiate(id, Number(value) || 1)); break;
+      case 'rear-queen': {
+        this.requestConfirm('尝试分化新蜂后', `将消耗 ${costStr(e.colony.queenCost())}，成功率为25%；失败不会返还资源。`, '确认培育', () => {
+          this.feedback(e.differentiateQueen());
+        });
+        return;
+      }
       case 'cancel-batch': this.feedback(e.cancelBatch(Number(id))); break;
       case 'open-upgrade': this.upgradeBuilding = id; this.openPanel('upgrade', true, !inPanel); return;
       case 'expand-next': this.expandNext(); break;
@@ -1663,14 +1686,6 @@ export class BrowserUI {
       case 'claim-overflow': this.feedback(e.claimOverflow()); break;
       case 'codex-tab': this.codexTab = id; break;
       case 'toggle-setting': this.toggleSetting(id); return;
-      case 'set-orientation': {
-        if (id !== 'landscape' && id !== 'portrait') return;
-        void this.session.setOrientation(id).then((ok) => {
-          this.showToast(ok ? `已固定为${id === 'landscape' ? '横屏' : '竖屏'}` : '已保存方向偏好；当前浏览器不允许锁定，安装版可直接生效', !ok);
-          this.refreshGame(true);
-        });
-        return;
-      }
       case 'open-boost': this.boostModal = true; this.session.audio.play('ui_open_panel'); break;
       case 'close-boost': this.boostModal = false; break;
       case 'ad-boost': {
@@ -1945,7 +1960,7 @@ export class BrowserUI {
     if (this.swarmTarget.length === 0) return;
     const target = this.engine().w.cfg.regions.find((region) => region.id === this.swarmTarget);
     if (target === undefined) return;
-    this.requestConfirm(`前往${target.name}`, '本轮蜂群、资源、建筑与研究将重置；传承点、天赋、图鉴、成就和设置永久保留。', '确认分蜂', () => {
+    this.requestConfirm(`前往${target.name}`, '新蜂后将带走一半人口和当前资源建立新巢；原蜂群保留另一半及现有建设。新巢建设与升级成本提高为2倍。', '确认分蜂', () => {
       const points = this.engine().swarmPreview().total;
       const result = this.engine().swarm(target.id);
       this.feedback(result);

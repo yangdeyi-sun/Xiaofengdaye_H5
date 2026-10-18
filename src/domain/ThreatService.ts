@@ -33,7 +33,7 @@ export class ThreatService {
       return;
     }
     th.enabled = true;
-    th.nextSpawnAt = this.w.s.run.time + 60;
+    th.nextSpawnAt = this.w.s.run.time + (this.w.s.meta.tutorialDone ? 45 : 120);
     th.nextBearAt = this.w.s.run.time + 1500;
   }
 
@@ -45,9 +45,11 @@ export class ThreatService {
     const t = this.w.s.run.time;
     const isBear = type === ThreatType.Bear;
     const warn = isBear ? 60 * this.w.attrs.get('guard.warning') : 0;
+    const fallbackLifetime = !isBear && d.lifetime <= 0 && this.w.role(Role.Guard) <= 0 ? 75 : 0;
     const ev: ThreatEvent = {
       eventId: `th${th.nextId}`, type: type, targetId: targetId, phase: isBear ? ThreatPhase.Warning : ThreatPhase.Active,
-      hp: hp, maxHp: hp, startedAt: t, endsAt: isBear ? t + warn : (d.lifetime > 0 ? t + d.lifetime : 0),
+      hp: hp, maxHp: hp, startedAt: t,
+      endsAt: isBear ? t + warn : (d.lifetime > 0 ? t + d.lifetime : (fallbackLifetime > 0 ? t + fallbackLifetime : 0)),
       postponed: 0, settled: false
     };
     th.nextId += 1;
@@ -67,7 +69,8 @@ export class ThreatService {
   }
 
   private pickType(): string {
-    const season = this.w.s.run.season.season;
+    const current = this.w.s.run.season.season;
+    const season = current === 'tutorial' ? 'spring' : current;
     const types = [ThreatType.Wasp, ThreatType.Web, ThreatType.Moth];
     let total = 0;
     const ws: number[] = [];
@@ -109,9 +112,12 @@ export class ThreatService {
           best = a.fieldId;
         }
       });
-      return best;
+      if (best.length > 0) return best;
+      const fallback = this.w.s.run.map.fields.find((f: FlowerField) => f.discovered);
+      return fallback === undefined ? '' : fallback.fieldId;
     }
-    const known = this.w.s.run.map.fields.filter((f: FlowerField) => f.discovered && !f.webbed && !f.home);
+    let known = this.w.s.run.map.fields.filter((f: FlowerField) => f.discovered && !f.webbed && !f.home);
+    if (known.length === 0) known = this.w.s.run.map.fields.filter((f: FlowerField) => f.discovered && !f.webbed);
     if (known.length === 0) {
       return '';
     }
@@ -121,17 +127,24 @@ export class ThreatService {
   private spawnTick(): void {
     const th = this.w.s.run.threats;
     const t = this.w.s.run.time;
-    if (!th.enabled || this.w.offline || !this.w.s.run.season.formal || this.w.role(Role.Guard) <= 0) {
+    if (!th.enabled || this.w.offline) {
       return;
     }
+    // 新手结束立即切到高频节奏，不沿用新手阶段可能还剩十几分钟的低频计时器。
+    if (this.w.s.meta.tutorialDone && th.nextSpawnAt > t + 90) th.nextSpawnAt = t + 45;
     if (t >= th.nextSpawnAt) {
       const sd = this.w.seasonDef();
-      const mul = Math.max(0.15, sd.threatMul * this.w.region().threatMul);
-      th.nextSpawnAt = t + 170 / mul * this.w.rng.range(0.7, 1.3);
+      const spring = this.w.cfg.seasons.find((season) => season.id === 'spring');
+      const seasonThreat = sd.id === 'tutorial' ? (spring?.threatMul ?? 0.6) : sd.threatMul;
+      const mul = Math.max(0.15, seasonThreat * this.w.region().threatMul);
+      const cycle = Math.max(0, this.w.s.run.season.cycleIndex);
+      const baseGap = this.w.s.meta.tutorialDone ? Math.max(30, 90 / (1 + cycle * 0.18)) : 420;
+      th.nextSpawnAt = t + baseGap / mul * this.w.rng.range(0.75, 1.25);
       const open = th.active.filter((e: ThreatEvent) => !e.settled && e.type !== ThreatType.Bear).length;
       // 默认一次只处理一个普通敌害；已有敌害时仅 20% 概率允许追加，最多三个。
       const canOverlap = open === 0 || (open < 3 && this.w.rng.chance(0.2));
-      if (canOverlap && this.w.adults() >= 8) {
+      const noviceRoll = this.w.s.meta.tutorialDone || this.w.rng.chance(0.45);
+      if (canOverlap && noviceRoll) {
         const type = this.pickType();
         const target = type.length > 0 ? this.pickTarget(type) : '';
         if (type.length > 0 && target.length > 0) {
@@ -143,7 +156,7 @@ export class ThreatService {
     if (t >= th.nextBearAt && this.w.interactive) {
       th.nextBearAt = t + this.w.rng.range(1800, 2700);
       const bearOpen = th.active.some((e: ThreatEvent) => e.type === ThreatType.Bear && !e.settled);
-      if (!bearOpen && this.w.adults() >= 30 && !this.w.isWinter()) {
+      if (!bearOpen && this.w.s.meta.tutorialDone && this.w.role(Role.Guard) > 0 && this.w.adults() >= 30 && !this.w.isWinter()) {
         this.spawn(ThreatType.Bear, 'hive');
       }
     }
@@ -182,29 +195,15 @@ export class ThreatService {
   }
 
   tick(dt: number): void {
-    // 兼容旧存档：若敌害曾在守卫开放前生成，直接安全撤离并重置开放状态。
-    if (this.w.role(Role.Guard) <= 0) {
-      const th = this.w.s.run.threats;
-      th.active.forEach((e: ThreatEvent) => {
-        if (!e.settled) {
-          if (e.type === ThreatType.Web) {
-            const f = this.w.field(e.targetId);
-            if (f !== null) { f.webbed = false; }
-          }
-          e.settled = true;
-          e.phase = ThreatPhase.Expired;
-        }
-      });
-      th.enabled = false;
-      th.nextSpawnAt = 0;
-      th.nextBearAt = 0;
-      this.w.fieldEff = {};
-      this.w.mothActive = false;
-      return;
-    }
     this.spawnTick();
     this.allocateGuards();
     const t = this.w.s.run.time;
+    if (this.w.role(Role.Guard) <= 0) {
+      // 兼容旧存档中的无限期蛛网/蜡螟：尚无守卫时，敌害会在短暂干扰后自行离开。
+      this.activeList().forEach((event: ThreatEvent) => {
+        if (event.phase === ThreatPhase.Active && event.endsAt <= 0) event.endsAt = t + 75;
+      });
+    }
     const atk = this.w.attrs.get('guard.attack') * this.w.attrs.get('guard.range');
     const eff: Record<string, number> = {};
     let moth = false;

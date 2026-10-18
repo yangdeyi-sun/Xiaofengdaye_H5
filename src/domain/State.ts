@@ -15,6 +15,10 @@ export interface HiveState {
   ringLevel: number;
   cells: HexCell[];
   expansions: number;
+  /** 全部巢格扩建完成的游戏时刻；0 表示尚未达到上限。 */
+  fullAt: number;
+  /** 达到上限后，在 1~2 个完整四季轮回之间随机确定的掉落时刻。 */
+  fallAt: number;
 }
 
 export interface LarvaBatch {
@@ -45,6 +49,9 @@ export interface ColonyState {
   hatched: number;
   lifeDebt: number;
   collapsed: boolean;
+  /** 已成功培育、可以带领分蜂的新蜂后。 */
+  youngQueens: number;
+  queenAttempts: number;
 }
 
 export interface FlowerField {
@@ -212,8 +219,8 @@ export interface SettingsState {
   privacyAccepted: boolean;
   privacyVersion: string;
   fontScaleSafe: boolean;
-  /** 游戏画面固定方向；由平台层应用，避免重力感应导致横竖屏反复切换。 */
-  orientation: 'landscape' | 'portrait';
+  /** 默认跟随设备姿态；保留旧值只用于兼容历史存档。 */
+  orientation: 'auto' | 'landscape' | 'portrait';
 }
 
 /** 非当前蜂群的完整运行快照；再次切换时按离线时长补算经营进度。 */

@@ -117,7 +117,8 @@ export function createRun(cfg: GameConfigDef, regionId: string, regionIndex: num
   const colony: ColonyState = {
     larvae: startLarvae, roles: roles, injured: injured, batches: [], nextBatchId: 1, layCooldown: 0,
     autoLay: false, autoHatch: false, autoRatio: ratio, houseWaxShare: 0.25, forageStrategy: ForageStrategy.Balanced,
-    pollinators: {}, guardPriority: GuardPriority.Balanced, eggsLaid: 0, hatched: 0, lifeDebt: 0, collapsed: false
+    pollinators: {}, guardPriority: GuardPriority.Balanced, eggsLaid: 0, hatched: 0, lifeDebt: 0, collapsed: false,
+    youngQueens: 0, queenAttempts: 0
   };
   const map: MapState = { fields: generateFields(cfg, region, rng), scouts: [], nextScoutId: 1 };
   const season: SeasonState = {
@@ -143,7 +144,7 @@ export function createInitialState(cfg: GameConfigDef, playerId: string, now: nu
     vibration: true, particles: true, reduceMotion: false, eventAnimations: true, gameSpeed: 1,
     ecoMode: false, skin: 'classic',
     continuation: false, privacyAccepted: false, privacyVersion: '', fontScaleSafe: true,
-    orientation: 'landscape'
+    orientation: 'auto'
   };
   const meta: MetaState = {
     playerId: playerId, createdAt: now, totalPlayTime: 0, swarmCount: 0, regionsVisited: [cfg.regions[0].id],

@@ -161,10 +161,12 @@ export class GameSession {
     this.audio.vibrateOn = settings.vibration;
     this.audio.setMusic(settings.music);
     this.audio.setVolumes(settings.musicVolume / 100, settings.ambientVolume / 100, settings.effectsVolume / 100);
-    void platform().setOrientation?.(settings.orientation);
+    // 画面始终跟随设备姿态，横握为横屏、竖握为竖屏，不再保存手动锁定。
+    settings.orientation = 'auto';
+    void platform().setOrientation?.('auto');
   }
 
-  async setOrientation(orientation: 'landscape' | 'portrait'): Promise<boolean> {
+  async setOrientation(orientation: 'auto' | 'landscape' | 'portrait'): Promise<boolean> {
     if (this.eng === null) return false;
     this.eng.state.meta.settings.orientation = orientation;
     this.eng.saveRequested = true;
@@ -544,7 +546,8 @@ export class GameSession {
     const season = engine.run.season;
     let alert = '';
     const honeyPct = Math.round(engine.w.econ.fillRatio(Res.Honey) * 100);
-    if (honeyPct >= 95) alert = '储蜜格快满了，快来收蜜';
+    if (engine.run.hive.fallAt > 0) alert = `蜂巢已达上限，请在${formatDuration(engine.hive.fallRemaining())}内分蜂`;
+    else if (honeyPct >= 95) alert = '储蜜格快满了，快来收蜜';
     else if (season.season === SeasonId.WinterPrep || (season.season === SeasonId.Autumn && engine.season.remaining() < 90)) alert = '冬季即将到来，检查储备';
     else if (engine.threats.pendingBear() !== null) alert = '熊正在接近蜂巢！';
     else if (engine.swarmPreview().ready) alert = '分蜂条件已达成';

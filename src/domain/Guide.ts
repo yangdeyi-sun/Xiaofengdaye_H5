@@ -102,7 +102,7 @@ export const INTRO_TOPICS: IntroTopic[] = [
     '“我会守护好这个蜂巢。”',
     'xf_nav_queen', '', '', (e: GameEngine) => e.state.meta.tutorialDone),
   new IntroTopic('colonySwitch', '两个蜂群都在继续经营',
-    '第一次分蜂不会再清除原蜂群；新旧蜂群会各自保留建筑、资源、蜜蜂和地图进度。',
+    '分蜂不会清除原蜂群；原群保留现有建设和一半人口资源，新蜂后带走另一半建立新巢。',
     '打开侧边栏的“蜂群切换”，可以随时回到原蜂群；切换时会自动结算它离开期间的经营收益。',
     'xf_nav_swarm', 'panel:colonies', '', (e: GameEngine) => e.state.meta.swarmCount > 0 && e.state.colonies.length > 0),
   new IntroTopic('flowerRecovery', '花丛也需要休息', '每片花丛的花蜜有限，采空后会暂时停止供应。',
@@ -195,8 +195,8 @@ export const INTRO_TOPICS: IntroTopic[] = [
   new IntroTopic('evolution', '进化腔', '研究本种区专属强化的地方。',
     '建成后可以用蜂蜜和蜂王浆进行研究；研究只在本种区有效。', 'xf_building_evolution', 'hive', 'hive',
     (e: GameEngine) => available(e, Bld.Evolution)),
-  new IntroTopic('swarm', '分蜂', '老蜂后带着蜂群离巢，去新的种区重新开始。',
-    '达成条件后可以分蜂：本轮进度重置，换来永久的蜂王传承点。', 'xf_nav_split', '', '',
+  new IntroTopic('swarm', '分蜂', '先投入育王资源，以25%成功率分化出一只新蜂后。',
+    '达成其余条件后，新蜂后会带走一半人口和资源建立新巢；新巢建设成本逐代翻倍，并获得永久传承点。', 'xf_nav_split', '', '',
     (e: GameEngine) => e.w.unlocked('t_survive_winter'))
 ];
 
@@ -333,6 +333,9 @@ export class Guide {
     }
     if (e.swarmPreview().ready) {
       add(new Hint('swarm', '分蜂条件已达成，可以前往新的种区', 'new', 'panel:swarm', 'xf_nav_split'));
+    } else if (e.w.unlocked('t_survive_winter') && e.run.colony.youngQueens <= 0 &&
+      e.w.econ.canAfford(e.colony.queenCost())) {
+      add(new Hint('rearQueen', '育王资源已备齐，可以尝试分化新蜂后', 'try', 'panel:swarm', 'xf_building_queen'));
     }
     const ct = e.prog.colonyTask();
     if (ct !== null && !ct.claimed && ct.current >= ct.target) {

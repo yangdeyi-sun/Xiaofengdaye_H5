@@ -200,7 +200,7 @@ export function migrate(d: SaveDTO, from: number): SaveDTO {
   if (from === 2) {
     d.activeColonyId = 'colony-0';
     d.colonies = [];
-    d.meta.settings.orientation = 'landscape';
+    d.meta.settings.orientation = 'auto';
   }
   return d;
 }
@@ -219,9 +219,8 @@ export function repair(d: SaveDTO): void {
   if (settings.eventAnimations === undefined) {
     settings.eventAnimations = true;
   }
-  if (settings.orientation !== 'portrait' && settings.orientation !== 'landscape') {
-    settings.orientation = 'landscape';
-  }
+  // v0.5.1 以前保存的是手动固定方向；新版本统一恢复为跟随设备姿态。
+  settings.orientation = 'auto';
   const gameSpeed = num(settings.gameSpeed, 1);
   settings.gameSpeed = [1, 2, 4].indexOf(gameSpeed) >= 0 ? gameSpeed : 1;
   if (m.featureUnlocks === undefined) {
@@ -269,6 +268,8 @@ export function repair(d: SaveDTO): void {
 
 function repairRun(r: RunDTO): void {
   r.time = Math.max(0, num(r.time, 0));
+  r.hive.fullAt = Math.max(0, num(r.hive.fullAt, 0));
+  r.hive.fallAt = Math.max(r.hive.fullAt, num(r.hive.fallAt, 0));
   const c = r.colony;
   c.autoLay = false;
   c.autoHatch = false;
@@ -286,6 +287,21 @@ function repairRun(r: RunDTO): void {
   }
   if (c.collapsed === undefined) {
     c.collapsed = false;
+  }
+  c.youngQueens = Math.max(0, Math.floor(num(c.youngQueens, 0)));
+  c.queenAttempts = Math.max(0, Math.floor(num(c.queenAttempts, 0)));
+  const validSeasons = ['tutorial', 'spring', 'summer', 'autumn', 'winterPrep', 'winter'];
+  if (!r.season || validSeasons.indexOf(r.season.season) < 0) {
+    r.season = {
+      formal: false, season: 'tutorial', startedAt: r.time, endsAt: r.time, cycleIndex: 0,
+      firstWinterProtected: true, wintersSurvived: 0, starving: false, starveSeconds: 0
+    };
+  } else {
+    r.season.startedAt = Math.max(0, num(r.season.startedAt, r.time));
+    r.season.endsAt = Math.max(r.season.startedAt, num(r.season.endsAt, r.time));
+    r.season.cycleIndex = Math.max(0, Math.floor(num(r.season.cycleIndex, 0)));
+    r.season.wintersSurvived = Math.max(0, Math.floor(num(r.season.wintersSurvived, 0)));
+    r.season.starveSeconds = Math.max(0, num(r.season.starveSeconds, 0));
   }
   const st = r.stats;
   if (st.houseWaxMade === undefined) {

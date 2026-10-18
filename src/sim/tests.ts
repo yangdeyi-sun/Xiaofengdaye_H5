@@ -140,7 +140,7 @@ const rep = decodeEnvelope(JSON.stringify(envBad));
 ok(rep.ok && rep.state !== null && rep.state.run.colony.larvae === 0 && rep.state.run.res[Res.Honey].isZero() &&
   rep.state.run.colony.roles[Role.Forager] === 0, 'repair illegal values');
 ok(rep.state !== null && rep.state.meta.settings.musicVolume === 80 && rep.state.meta.settings.eventAnimations &&
-  rep.state.meta.settings.gameSpeed === 1 && rep.state.meta.settings.orientation === 'landscape',
+  rep.state.meta.settings.gameSpeed === 1 && rep.state.meta.settings.orientation === 'auto',
   'repair adds new settings defaults');
 
 // v2 -> v3：旧存档补齐方向与多蜂群容器
@@ -154,7 +154,7 @@ env2.payload = JSON.stringify(payload2);
 env2.checksum = checksum(env2.payload);
 const mig2 = decodeEnvelope(JSON.stringify(env2));
 ok(mig2.ok && mig2.state?.activeColonyId === 'colony-0' && mig2.state.colonies.length === 0 &&
-  mig2.state.meta.settings.orientation === 'landscape', 'migrate v2 adds multi-colony and orientation defaults');
+  mig2.state.meta.settings.orientation === 'auto', 'migrate v2 adds multi-colony and automatic orientation defaults');
 
 // 已解锁巢格之间可无损移动或交换建筑
 const swapState = createInitialState(DEFAULT_CONFIG, 'swap', 0, 12);
@@ -165,6 +165,20 @@ swapA.building = Bld.Storage;
 swapB.building = Bld.Brewery;
 ok(swapEngine.swapCells(swapA.cellId, swapB.cellId).ok && swapA.building === Bld.Brewery && swapB.building === Bld.Storage,
   'unlocked hive cells swap buildings without demolition');
+
+// 蜂巢到达最大圈层后，在 1~2 个四季轮回之间确定掉落时刻；超时后本群从零开始。
+const fullHive = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'full-hive', 0, 121));
+fullHive.run.hive.ringLevel = fullHive.w.region().maxRing;
+const cycleLength = DEFAULT_CONFIG.seasons.filter((season) => season.id !== 'tutorial')
+  .reduce((sum, season) => sum + fullHive.w.seasonDuration(season.id), 0);
+ok(fullHive.hive.ensureFallDeadline() && fullHive.run.hive.fallAt >= cycleLength &&
+  fullHive.run.hive.fallAt <= cycleLength * 2, 'full hive receives a random fall deadline between one and two cycles');
+fullHive.run.res[Res.Honey] = BigNum.of(999);
+fullHive.run.colony.roles[Role.House] = 9;
+fullHive.run.hive.fallAt = 0.5;
+fullHive.step(1);
+ok(fullHive.run.time === 0 && fullHive.w.adults() === 0 && fullHive.w.econ.num(Res.Honey) === 0,
+  'overdue full hive falls and current colony restarts from zero');
 
 // ---------- 离线 ----------
 const st2 = decodeEnvelope(text).state!;
@@ -180,16 +194,21 @@ const r0 = eng2.settleOffline(0, 'S2', '');
 ok(r0 !== null && r0.credited === 0, 'offline zero elapsed');
 void honeyBefore;
 
-// ---------- 敌害开放时机与首只守卫 ----------
+// ---------- 首个建筑后低频敌害；没有守卫时只造成短暂、非致命干扰 ----------
 const guardGate = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'guard-gate', 0, 19));
 const webField = guardGate.run.map.fields[0];
 webField.webbed = true;
 guardGate.run.threats.enabled = true;
+guardGate.run.threats.nextSpawnAt = 1e9;
 guardGate.run.threats.active.push({ eventId: 'early', type: ThreatType.Web, targetId: webField.fieldId,
   phase: ThreatPhase.Active, hp: 10, maxHp: 10, startedAt: 0, endsAt: 0, postponed: 0, settled: false });
 guardGate.step(0.1);
-ok(!guardGate.run.threats.enabled && guardGate.threats.activeList().length === 0 && !webField.webbed,
-  'threats wait for first guard and old early threat retires');
+ok(guardGate.run.threats.enabled && guardGate.threats.activeList().length === 1 && webField.webbed &&
+  guardGate.threats.activeList()[0].endsAt > guardGate.run.time,
+  'early threat remains visible but receives a safe expiry without guards');
+guardGate.step(76);
+ok(guardGate.threats.activeList().length === 0 && !webField.webbed,
+  'unguarded novice threat leaves without destroying the colony');
 const guardCell = guardGate.run.hive.cells.find((c) => c.unlocked && c.building === '');
 if (guardCell) { guardCell.building = Bld.GuardRoom; }
 guardGate.run.colony.larvae = 1;
@@ -246,6 +265,19 @@ const pv = eng4.swarmPreview();
 const resPart = pv.sources[pv.sources.length - 1].points;
 ok(resPart <= pv.total * 0.2 + 1e-9, 'resource bonus <= 20%', `${resPart}/${pv.total}`);
 ok(!pv.ready && !eng4.swarm('alpine').ok, 'swarm blocked when not ready');
+const queenEngine = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'queen-attempt', 0, 77));
+queenEngine.run.res[Res.Honey] = BigNum.of(50000);
+queenEngine.run.res[Res.Wax] = BigNum.of(20000);
+queenEngine.run.res[Res.Jelly] = BigNum.of(250);
+let queenTries = 0;
+while (queenEngine.run.colony.youngQueens === 0 && queenTries < 20) {
+  queenTries += 1;
+  queenEngine.differentiateQueen();
+}
+ok(queenEngine.run.colony.youngQueens === 1 && queenEngine.run.colony.queenAttempts === queenTries &&
+  Math.abs(queenEngine.w.econ.num(Res.Honey) - (50000 - queenTries * 1000)) < 1e-6,
+  'queen differentiation uses fixed resources and deterministic 25% attempts',
+  `${queenEngine.run.colony.youngQueens}/${queenEngine.run.colony.queenAttempts}/${queenTries}/${queenEngine.w.econ.num(Res.Honey)}`);
 eng4.state.meta.swarmCount = 50;
 const eased = eng4.swarmPreview();
 const easedHoney = eased.conditions.find((c) => c.id === 'honey');
@@ -270,20 +302,27 @@ const s5 = decodeEnvelope(text).state!;
 const e5 = new GameEngine(DEFAULT_CONFIG, s5);
 e5.run.colony.roles[Role.Forager] = 200;
 e5.run.res[Res.Honey] = BigNum.of(1e6);
+e5.run.res[Res.Wax] = BigNum.of(1e6);
 e5.run.res[Res.Jelly] = BigNum.of(50);
+e5.run.colony.youngQueens = 1;
 e5.run.season.wintersSurvived = 1;
 e5.run.stats.pollinations = 1;
 e5.run.map.fields.forEach((f) => { f.discovered = true; });
 for (const t of DEFAULT_CONFIG.tracks.slice(0, 6)) e5.run.upgrades[t.id] = 4;
 const before5 = e5.state.meta.inheritance.totalPoints;
+const adultsBeforeSwarm = e5.w.adults();
 const sw = e5.swarm('rooftop');
 ok(sw.ok, 'swarm executes', sw.message);
-ok(e5.run.regionId === 'rooftop' && e5.run.time === 0 && e5.w.adults() === 0, 'swarm creates new region');
+ok(e5.run.regionId === 'rooftop' && e5.run.time === 0 &&
+  Math.abs(e5.w.adults() - adultsBeforeSwarm / 2) <= 2,
+  'swarm carries half the adults to new region', `${adultsBeforeSwarm}/${e5.w.adults()}`);
 ok(e5.state.meta.inheritance.totalPoints > before5 && e5.state.meta.swarmCount === 1, 'swarm grants points');
 ok(e5.state.meta.codexFlowers.length > 0, 'swarm keeps codex');
 ok(Object.keys(e5.run.upgrades).length === 0 && Object.keys(e5.run.research).length === 0, 'swarm resets upgrades');
-ok(e5.state.colonies.length === 1 && e5.state.colonies[0].run.colony.roles[Role.Forager] === 200,
-  'swarm preserves original colony for later switching');
+ok(e5.state.colonies.length === 1 && e5.state.colonies[0].run.colony.roles[Role.Forager] === 100 &&
+  Math.abs(e5.run.res[Res.Honey].toNumber() - e5.state.colonies[0].run.res[Res.Honey].toNumber()) < 1e-6,
+  'swarm splits adults and current resources equally while preserving original colony');
+ok(e5.hive.constructionCostMul() === 2, 'new hive construction and upgrades cost twice the previous generation');
 const multiSave = decodeEnvelope(encodeEnvelope(e5.state, DEFAULT_CONFIG.configVersion, 6000));
 ok(multiSave.ok && multiSave.state?.colonies.length === 1 && multiSave.state.colonies[0].run.res[Res.Honey] instanceof BigNum,
   'multi-colony save roundtrip preserves BigNum resources');
@@ -299,6 +338,24 @@ seasonEngine.run.season.endsAt = 0;
 seasonEngine.season.tick(0.1);
 ok(seasonEngine.state.messages.filter((message) => message.kind === 'season').length === 1,
   'winter-to-spring emits one season notice');
+
+// 大时间步/离线设备不会反复叠加新手期冬季延迟，恢复在线时间后可正常进入冬季准备。
+const winterDelay = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'winter-delay', 0, 32));
+winterDelay.run.season.formal = true;
+winterDelay.run.season.season = 'autumn';
+winterDelay.run.season.startedAt = 0;
+winterDelay.run.season.endsAt = 10;
+winterDelay.run.time = 100;
+winterDelay.state.meta.totalPlayTime = 1200;
+winterDelay.w.offline = true;
+winterDelay.season.tick(90);
+ok(winterDelay.run.season.endsAt === 700 && winterDelay.run.season.season === 'autumn',
+  'winter novice delay uses one stable active-time deadline on large device time steps');
+winterDelay.w.offline = false;
+winterDelay.state.meta.totalPlayTime = 1800;
+winterDelay.run.time = 700;
+winterDelay.season.tick(0.1);
+ok(winterDelay.run.season.season === 'winterPrep', 'winter preparation starts normally after novice protection');
 
 // ---------- 首冬保护 ----------
 const s6 = decodeEnvelope(text).state!;

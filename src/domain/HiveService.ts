@@ -31,7 +31,7 @@ export function buildHive(maxRing: number): HiveState {
       }
     }
   }
-  const hive: HiveState = { ringLevel: 1, cells: cells, expansions: 0 };
+  const hive: HiveState = { ringLevel: 1, cells: cells, expansions: 0, fullAt: 0, fallAt: 0 };
   return hive;
 }
 
@@ -80,13 +80,41 @@ export class HiveService {
     const ringPow = Math.pow(e.expandRingGrowth, Math.max(0, c.ring - 2));
     const v = e.expandBaseWax * ringPow * Math.pow(e.expandCellGrowth,
       softExponent(this.w.s.run.hive.expansions, 12)) *
-      this.w.attrs.get('expand.costMul');
+      this.w.attrs.get('expand.costMul') * this.constructionCostMul();
     return [new CostAmount(Res.Wax, BigNum.of(Math.ceil(v)))];
   }
 
   buildCost(type: string): CostAmount[] {
     const def = this.w.bldDef(type);
-    return this.w.econ.costOf(def.costs, this.w.count(type), 1, 4);
+    return this.w.econ.costOf(def.costs, this.w.count(type), this.constructionCostMul(), 4);
+  }
+
+  /** 每次分蜂后，新蜂巢的建造、扩建和升级成本都是上一代的 2 倍。 */
+  constructionCostMul(): number {
+    return Math.pow(2, Math.max(0, Math.min(30, this.w.s.run.regionIndex)));
+  }
+
+  isAtCapacity(): boolean {
+    return this.w.s.run.hive.ringLevel >= this.w.region().maxRing;
+  }
+
+  /** 首次达到上限时确定掉落期限，并只提醒一次。 */
+  ensureFallDeadline(): boolean {
+    const hive = this.w.s.run.hive;
+    if (!this.isAtCapacity() || hive.fallAt > 0) return false;
+    const cycle = this.w.cfg.seasons
+      .filter((season) => season.id !== 'tutorial')
+      .reduce((sum, season) => sum + this.w.seasonDuration(season.id), 0);
+    hive.fullAt = this.w.s.run.time;
+    hive.fallAt = hive.fullAt + Math.max(60, cycle) * this.w.rng.range(1, 2);
+    this.w.msg('warn', '蜂巢已经扩建到上限！请在两个四季轮回内完成分蜂；最早一个轮回后可能掉落。');
+    this.w.emit('milestone', 0, 0, '蜂巢达到上限', 'hive');
+    return true;
+  }
+
+  fallRemaining(): number {
+    const fallAt = this.w.s.run.hive.fallAt;
+    return fallAt > 0 ? Math.max(0, fallAt - this.w.s.run.time) : 0;
   }
 
   buildingAvailable(type: string): boolean {
@@ -145,6 +173,7 @@ export class HiveService {
     }
     this.recomputeAdjacency();
     this.w.emit('expand', c.q, c.r, '扩建', 'hive');
+    this.ensureFallDeadline();
     return CmdResult.ok('扩建成功');
   }
 
@@ -186,7 +215,7 @@ export class HiveService {
   }
 
   upgradeCost(t: UpgradeTrackDef): CostAmount[] {
-    return this.w.econ.costOf(t.costs, this.trackLevel(t.id), 1, 10);
+    return this.w.econ.costOf(t.costs, this.trackLevel(t.id), this.constructionCostMul(), 10);
   }
 
   upgrade(trackId: string): CmdResult {
