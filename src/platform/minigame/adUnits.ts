@@ -22,7 +22,9 @@ export const DOUYIN_AD_UNITS: AdUnitConfig = {
     bear_aid: '',
     winter_supply: '',
     colony_revive: '',
-    swarm_bonus: ''
+    swarm_bonus: '',
+    spring_supply: '',
+    honey_topup: ''
   },
   rewardedDefault: typeof __DOUYIN_REWARDED_ID__ !== 'undefined' ? __DOUYIN_REWARDED_ID__ : '',
   interstitial: typeof __DOUYIN_INTERSTITIAL_ID__ !== 'undefined' ? __DOUYIN_INTERSTITIAL_ID__ : ''

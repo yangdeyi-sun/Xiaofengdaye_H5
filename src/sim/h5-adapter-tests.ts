@@ -7,11 +7,18 @@ import { setPlatform } from '../platform/Platform';
 import type { AdBackend, RewardedResult } from '../platform/Platform';
 import { WebPlatform } from '../platform/web/WebPlatform';
 import { AdService } from '../app/ads/AdService';
-import { grantBearAid, grantOfflineDouble, grantSwarmBonus, grantWinterSupply, swarmBonusPoints } from '../app/ads/AdRewards';
+import {
+  grantBearAid, grantHoneyTopUp, grantOfflineDouble, grantSpringSupply, grantSwarmBonus, grantWinterSupply, honeyTopUp,
+  springSupplyWanted, swarmBonusPoints
+} from '../app/ads/AdRewards';
 import { GameEngine } from '../domain/GameEngine';
 import { GameSession } from '../app/GameSession';
 import { BigNum } from '../common/BigNum';
 import { Res, ThreatType } from '../domain/Types';
+import { PresentationQueue } from '../app/PresentationQueue';
+import { BrowserUI } from '../app/BrowserUI';
+import { BrowserAudioService } from '../platform/BrowserAudioService';
+import type { SoundHandle } from '../platform/Platform';
 
 class MemoryStorage implements Storage {
   private values = new Map<string, string>();
@@ -31,6 +38,107 @@ function check(condition: boolean, label: string): void {
   if (!condition) throw new Error(label);
   passed++;
 }
+
+// Automatic notices retain their reading time while the player holds, drags or opens a panel.
+{
+  const queue = new PresentationQueue();
+  const first = { key: 'a', text: 'first', kind: 'season', duration: 3000 };
+  queue.enqueue(first); queue.enqueue(first);
+  queue.enqueue({ key: 'b', text: 'second', kind: 'milestone', duration: 2000 });
+  check(queue.tick(0, true) === null, '操作时不开始自动提示');
+  check(queue.tick(1000, false)?.key === 'a', '空闲后按顺序显示提示');
+  check(queue.tick(2000, true) === null, '打开面板后隐藏并暂停提示');
+  check(queue.tick(60000, false)?.key === 'a', '面板停留时间不消耗阅读时间');
+  check(queue.tick(61999, false)?.key === 'a', '恢复后保留剩余阅读时间');
+  check(queue.tick(62000, false)?.key === 'b', '前一条结束后显示下一条，重复项不入队');
+  queue.dismiss();
+  check(queue.empty, '主动关闭后队列为空');
+  queue.enqueue(first); queue.clear();
+  check(queue.tick(70000, false) === null, '清除进度时清空旧提示');
+}
+
+class TestSound implements SoundHandle {
+  volume = 0;
+  paused = true;
+  disposed = false;
+  finish: () => void = () => {};
+  constructor(readonly path: string, readonly loop: boolean) {}
+  async play(): Promise<void> { this.paused = false; }
+  pause(): void { this.paused = true; }
+  stop(): void { this.paused = true; }
+  dispose(): void { this.disposed = true; this.paused = true; }
+  onFinish(callback: () => void): void { this.finish = callback; }
+}
+
+const sounds: TestSound[] = [];
+const soundPlatform = Object.create(web) as WebPlatform;
+Object.defineProperty(soundPlatform, 'audio', { value: {
+  create(path: string, loop: boolean): SoundHandle { const sound = new TestSound(path, loop); sounds.push(sound); return sound; }
+} });
+setPlatform(soundPlatform);
+{
+  const audio = new BrowserAudioService();
+  audio.setScene('privacy', '', false, ''); audio.unlock(); audio.play('ui_tap');
+  check(sounds.length === 0, '隐私页保持静音');
+  audio.setScene('game', '', false, '');
+  check(sounds.at(-1)?.path.endsWith('bgm_game.mp3') === true, '游戏播放经营音乐');
+  audio.play('collect');
+  check(sounds.at(-1)?.path.endsWith('act_collect.mp3') === true, '手动采蜜播放反馈声');
+  const total = sounds.length;
+  audio.play('collect');
+  check(sounds.length === total, '连续采蜜遵守音效冷却');
+  audio.setSfx(false); audio.play('ui_error');
+  check(sounds.length === total && sounds.filter((s) => !s.loop).every((s) => s.disposed), '关闭音效释放实例并停止新音效');
+  audio.setScene('game', '', false, 'snow');
+  check(sounds.at(-1)?.path.endsWith('bgm_winter.mp3') === true, '冬季切换冬季音乐');
+  audio.pauseMusic();
+  check(sounds.every((s) => s.disposed), '切后台释放所有正在播放的声音');
+  audio.release();
+}
+
+// UI adapters use the same guard: an automatic intro never interrupts a gesture or a panel.
+{
+  const session = new GameSession();
+  session.eng = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'ui-guards', Date.now(), 42));
+  session.engine().state.meta.settings.privacyAccepted = true;
+  session.engine().state.meta.settings.privacyVersion = '2026-10-16';
+  const browser = new BrowserUI({} as HTMLElement, session);
+  const bp = browser as unknown as {
+    pointers: Map<number, { x: number; y: number }>; introId: string; introGapUntil: number;
+    panel: string; offlineReport: typeof session.pendingOffline;
+    checkRuntimeEvents(): void; renderRuntimeOverlays(): string;
+  };
+  session.renderer = null;
+  bp.introGapUntil = 0; bp.pointers.set(1, { x: 0, y: 0 });
+  bp.checkRuntimeEvents(); check(bp.introId === '', '网页端按住时不弹教学');
+  bp.pointers.clear(); bp.panel = 'queen';
+  bp.checkRuntimeEvents(); check(bp.introId === '', '网页端面板打开时不弹教学');
+  bp.panel = ''; bp.checkRuntimeEvents();
+  check(bp.introId !== '', '网页端空闲后显示待看的教学');
+  bp.offlineReport = { settlementId: 'test', credited: 3600, elapsed: 3600, truncated: 0,
+    gains: { honey: '10' }, seasonsPassed: [], notes: [], anomaly: '' };
+  const html = bp.renderRuntimeOverlays();
+  check(html.includes('offline-card') && !html.includes('intro-layer'), '离线报告与教学一次只展示一个');
+}
+// 主动广告：补齐差额、春季补给
+{
+  const eng = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'ad-topup', Date.now(), 43));
+  eng.run.res[Res.Honey] = BigNum.of(80);
+  const costs = [{ res: Res.Honey, amount: BigNum.of(100) }];
+  check(honeyTopUp(eng, costs) === 20, '只差少量蜂蜜时提供补齐差额');
+  eng.run.res[Res.Honey] = BigNum.of(10);
+  check(honeyTopUp(eng, costs) === 0, '差得太多时不提供补齐差额');
+  eng.run.res[Res.Honey] = BigNum.of(80);
+  check(honeyTopUp(eng, [{ res: Res.Honey, amount: BigNum.of(100) }, { res: Res.Wax, amount: BigNum.of(5) }]) === 0, '还缺蜂蜡时不提供补齐差额');
+  grantHoneyTopUp(eng, 20);
+  check(eng.w.econ.canAfford(costs.map((c) => ({ res: c.res, amount: c.amount })) as never), '补齐后正好买得起');
+  check(!springSupplyWanted(eng), '没熬过冬天时不提供春季补给');
+  eng.run.season.formal = true; eng.run.season.season = 'spring'; eng.run.season.wintersSurvived = 1; eng.run.season.cycleIndex = 1;
+  const before = eng.w.econ.num(Res.Honey);
+  check(springSupplyWanted(eng) && grantSpringSupply(eng) > 0 && eng.w.econ.num(Res.Honey) > before, '熬过冬天的春季可以领春季补给');
+  check(!springSupplyWanted(eng) && grantSpringSupply(eng) === 0, '每个春天只能领一次');
+}
+setPlatform(web);
 
 const repo = new BrowserSaveRepository();
 check(repo.load().result.error === 'NO_SAVE', '空存档应返回 NO_SAVE');

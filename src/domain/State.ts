@@ -52,6 +52,18 @@ export interface ColonyState {
   /** 已成功培育、可以带领分蜂的新蜂后。 */
   youngQueens: number;
   queenAttempts: number;
+  /** 繁育计划：按工种比例自动产卵与分化（中期解锁，离线照常运行） */
+  plan: BreedPlan;
+}
+
+export interface BreedPlan {
+  on: boolean;
+  /** 各工种权重 0~10 */
+  weights: Record<string, number>;
+  /** 至少保留的蜂蜜比例（占蜂蜜容量），入秋后另外保证越冬所需 */
+  reserve: number;
+  /** 计划自己产下、尚未分化的幼虫；手动产下的幼虫不会被计划拿走 */
+  larvae: number;
 }
 
 export interface FlowerField {
@@ -91,6 +103,17 @@ export interface MapState {
   fields: FlowerField[];
   scouts: ScoutAgent[];
   nextScoutId: number;
+  /** 蜜流花：新手结束后随机在花丛上开放一小会儿，点中立即获得一大口蜂蜜 */
+  bloom?: HoneyBloom;
+}
+
+export interface HoneyBloom {
+  /** 正在开放的花田；空字符串表示当前没有 */
+  fieldId: string;
+  until: number;
+  nextAt: number;
+  /** 已出现次数，用于确定性地挑选位置 */
+  count: number;
 }
 
 export interface SeasonState {
@@ -163,6 +186,8 @@ export interface RunStats {
   houseWaxMade: number;
   deliveredNectar: number;
   autoLays: number;
+  /** 已领取春季补给的四季轮次（-1 表示还没领过） */
+  springSupplyCycle?: number;
 }
 
 /** 本轮种区状态：分蜂时整体重建 */
@@ -259,6 +284,30 @@ export interface MetaState {
   featureUnlocks: string[];
   /** 已看过的新事物介绍（引导） */
   introsSeen: string[];
+  /** 每日签到与每日目标（按玩家本地日期） */
+  daily: DailyState;
+}
+
+export interface DailyTask {
+  kind: string;
+  target: number;
+  progress: number;
+  claimed: boolean;
+  /** 领取时获得的蜂蜜 */
+  reward: number;
+}
+
+export interface DailyState {
+  /** 当前目标所属日期 YYYY-MM-DD */
+  day: string;
+  tasks: DailyTask[];
+  bonusClaimed: boolean;
+  /** 最近一次签到日期 */
+  signedDay: string;
+  /** 连续签到天数（1~7 循环） */
+  streak: number;
+  /** 预留：累计计数 */
+  counts: Record<string, number>;
 }
 
 export interface GameState {

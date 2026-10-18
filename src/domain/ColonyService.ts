@@ -1,5 +1,8 @@
 import { BigNum } from '../common/BigNum';
-import { Bld, Reason, Res, Role, ALL_ROLES } from './Types';
+import { Bld, Reason, Res, Role, SeasonId, ALL_ROLES } from './Types';
+
+/** 繁育计划解锁所需成年蜂数量（或度过第一个冬天） */
+export const PLAN_UNLOCK_ADULTS = 20;
 import { LarvaBatch } from './State';
 import { CmdResult, CostAmount, World } from './World';
 
@@ -225,6 +228,111 @@ export class ColonyService {
 
   setRatio(_role: string, _v: number): void {}
 
+  // ---------------- 繁育计划 ----------------
+  /** 中期解锁：度过第一个冬天，或成年蜂达到 20 只 */
+  planUnlocked(): boolean {
+    return this.w.unlocked('t_survive_winter') || this.w.adults() >= PLAN_UNLOCK_ADULTS;
+  }
+
+  planUnlockText(): string {
+    return `蜂群达到 ${PLAN_UNLOCK_ADULTS} 只或度过第一个冬天后解锁（当前 ${this.w.adults()} 只）`;
+  }
+
+  setPlan(on: boolean): CmdResult {
+    if (on && !this.planUnlocked()) return CmdResult.fail('PLAN_LOCKED', this.planUnlockText());
+    this.w.s.run.colony.plan.on = on;
+    return CmdResult.ok(on ? '繁育计划已开启：蜂后会按比例自动产卵和分化' : '繁育计划已暂停，繁育改回手动');
+  }
+
+  setPlanWeight(role: string, v: number): void {
+    if (ALL_ROLES.indexOf(role) < 0) return;
+    this.w.s.run.colony.plan.weights[role] = Math.max(0, Math.min(10, Math.round(v)));
+  }
+
+  setPlanReserve(v: number): void {
+    this.w.s.run.colony.plan.reserve = Math.max(0, Math.min(0.9, v));
+  }
+
+  /** 计划保留的蜂蜜：容量比例与（入秋后）越冬所需取大者 */
+  planReserveHoney(): number {
+    const plan = this.w.s.run.colony.plan;
+    let keep = plan.reserve * this.w.econ.capacity(Res.Honey).toNumber();
+    const s = this.w.s.run.season;
+    if (s.formal && (s.season === SeasonId.Autumn || s.season === SeasonId.WinterPrep || s.season === SeasonId.Winter)) {
+      const sd = this.w.cfg.seasons.find((d) => d.id === SeasonId.Winter);
+      if (sd !== undefined) keep = Math.max(keep, this.w.adults() * sd.upkeep * sd.duration * this.w.attrs.get('storage.winterLoss'));
+    }
+    return keep;
+  }
+
+  /** 按比例当前最缺的工种；没有可培养的工种时返回空 */
+  planNextRole(): string {
+    const c = this.w.s.run.colony;
+    const roles = ALL_ROLES.filter((r: string) => this.roleAvailable(r) && (c.plan.weights[r] ?? 0) > 0);
+    if (roles.length === 0) return '';
+    let total = 0;
+    let wsum = 0;
+    const have: Record<string, number> = {};
+    roles.forEach((r: string) => {
+      const queued = c.batches.filter((b: LarvaBatch) => b.targetRole === r).reduce((n, b) => n + b.count, 0);
+      have[r] = this.w.role(r) + queued;
+      total += have[r];
+      wsum += c.plan.weights[r];
+    });
+    let best = '';
+    let bestGap = -1e9;
+    roles.forEach((r: string) => {
+      const gap = (total + 1) * c.plan.weights[r] / wsum - have[r];
+      if (gap > bestGap) {
+        bestGap = gap;
+        best = r;
+      }
+    });
+    return best;
+  }
+
+  /** 计划状态说明（界面展示） */
+  planStatus(): string {
+    const c = this.w.s.run.colony;
+    if (!this.planUnlocked()) return this.planUnlockText();
+    if (!c.plan.on) return '未开启：繁育仍由你手动进行';
+    const next = this.planNextRole();
+    if (next.length === 0) return '没有可培养的工种：把至少一个已建巢房的工种比例调到 1 以上';
+    if (this.w.population() >= this.w.popCap()) return '已达人口上限：扩建或升级蜂后室后继续';
+    const honey = this.w.econ.num(Res.Honey);
+    const need = this.planReserveHoney() + this.eggCost()[0].amount.toNumber() + this.roleCost(next)[0].amount.toNumber();
+    if (honey < need) return `攒蜂蜜中：保留 ${Math.ceil(this.planReserveHoney())}，下一只${this.w.roleDef(next).name}还差 ${Math.ceil(need - honey)}`;
+    return `运行中：下一只培养${this.w.roleDef(next).name}`;
+  }
+
+  /** 每 tick 尝试一次：先分化计划自己的幼虫，再产卵；手动操作随时可以插队 */
+  private planTick(): void {
+    const c = this.w.s.run.colony;
+    if (!c.plan.on) return;
+    if (!this.planUnlocked()) { c.plan.on = false; return; }
+    c.plan.larvae = Math.min(c.plan.larvae, c.larvae);
+    const role = this.planNextRole();
+    if (role.length === 0) return;
+    const reserve = this.planReserveHoney();
+    // 不提前堆积排队：只有空闲孵化位时才分化下一只
+    const waiting = c.batches.some((b: LarvaBatch) => !b.started);
+    if (c.plan.larvae > 0 && !waiting) {
+      const cost = this.roleCost(role);
+      if (this.w.econ.num(Res.Honey) - cost[0].amount.toNumber() >= reserve && this.w.econ.canAfford(cost)) {
+        const r = this.differentiate(role, 1);
+        if (r.ok) c.plan.larvae = Math.max(0, c.plan.larvae - 1);
+      }
+      return;
+    }
+    if (c.plan.larvae > 0 || c.layCooldown > 0 || waiting) return;
+    const egg = this.eggCost()[0].amount.toNumber();
+    const next = this.roleCost(role)[0].amount.toNumber();
+    if (this.w.econ.num(Res.Honey) - egg - next < reserve) return;
+    if (!this.canLay().ok) return;
+    const before = c.larvae;
+    if (this.doLay(true).ok) c.plan.larvae += c.larvae - before;
+  }
+
   setWaxShare(v: number): void {
     this.w.s.run.colony.houseWaxShare = Math.max(0, Math.min(1, v));
   }
@@ -235,9 +343,10 @@ export class ColonyService {
     if (c.layCooldown > 0) {
       c.layCooldown = Math.max(0, c.layCooldown - dt);
     }
-    // 旧存档的自动繁育开关也不会触发产卵或分化。
+    // 旧存档的自动繁育开关不再生效；自动繁育统一由“繁育计划”负责。
     c.autoLay = false;
     c.autoHatch = false;
+    this.planTick();
     // 孵化推进
     let finished = false;
     for (let i = c.batches.length - 1; i >= 0; i--) {
@@ -252,6 +361,7 @@ export class ColonyService {
           this.w.msg('special', `特殊变异！一只优秀的${this.w.roleDef(b.targetRole).name}诞生了`);
         }
         this.w.emit('hatch', 0, 0, this.w.roleDef(b.targetRole).name, 'hive');
+        this.w.dailyBump('hatch', b.count);
         finished = true;
       }
     }
@@ -326,7 +436,7 @@ export class ColonyService {
       return false;
     }
     const deathRate = this.w.adults() / this.w.cfg.economy.lifespan;
-    const layRate = 0;
+    const layRate = this.w.s.run.colony.plan.on ? 1 / Math.max(1, this.layInterval()) : 0;
     return deathRate > layRate;
   }
 }

@@ -487,6 +487,18 @@ export class World {
   econ: EconomyService;
   /** 离线聚合结算模式（SAVE-006）：不触发重大事件 */
   offline: boolean = false;
+  /** 每日目标进度：各系统在事件发生时调用 */
+  dailyBump(kind: string, n: number): void {
+    const d = this.s.meta.daily;
+    if (d === undefined || n <= 0) return;
+    d.tasks.forEach((t) => {
+      if (t.kind === kind && !t.claimed) t.progress = Math.min(t.target, t.progress + n);
+    });
+  }
+
+  /** 手动采集连击（不存档）：1.5 秒内连续采集累加 */
+  comboCount: number = 0;
+  comboAt: number = -10;
   /** 玩家在线可交互（ECO-007：熊等重大事件仅在线进入正式阶段） */
   interactive: boolean = true;
   inheritanceEnabled: boolean = true;

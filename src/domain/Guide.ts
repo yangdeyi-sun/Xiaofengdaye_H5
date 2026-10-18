@@ -192,6 +192,9 @@ export const INTRO_TOPICS: IntroTopic[] = [
     (e: GameEngine) => e.w.unlocked('t_build_storage') && hasOverflow(e)),
   new IntroTopic('colonyTask', '蜂群任务', '轮换出现的小目标。', '完成后在「任务」里领取蜂王浆奖励。', 'xf_nav_tasks', '', '',
     (e: GameEngine) => e.prog.colonyTask() !== null && e.w.unlocked('t_first_expand')),
+  new IntroTopic('breedPlan', '繁育计划', '蜂群壮大后，蜂后可以按你定好的比例自动繁育。',
+    '在蜂后详情里开启并调整各工种比例和保留蜂蜜；离线时也会照常繁育，手动孵化随时可以插队。', 'xf_status_automation', 'panel:queen', '',
+    (e: GameEngine) => e.state.meta.tutorialDone && e.colony.planUnlocked()),
   new IntroTopic('evolution', '进化腔', '研究本种区专属强化的地方。',
     '建成后可以用蜂蜜和蜂王浆进行研究；研究只在本种区有效。', 'xf_building_evolution', 'hive', 'hive',
     (e: GameEngine) => available(e, Bld.Evolution)),
@@ -337,9 +340,14 @@ export class Guide {
       e.w.econ.canAfford(e.colony.queenCost())) {
       add(new Hint('rearQueen', '育王资源已备齐，可以尝试分化新蜂后', 'try', 'panel:swarm', 'xf_building_queen'));
     }
+    if (e.daily.canSign()) {
+      add(new Hint('dailySign', `今日签到：领取第 ${e.daily.nextStreak()} 天奖励`, 'new', 'panel:tasks', 'xf_card_updated'));
+    } else if (e.daily.state.tasks.some((t) => !t.claimed && t.progress >= t.target) || e.daily.bonusReady()) {
+      add(new Hint('dailyTask', '每日目标完成了：到「任务」里领取奖励', 'new', 'panel:tasks', 'xf_nav_tasks'));
+    }
     const ct = e.prog.colonyTask();
     if (ct !== null && !ct.claimed && ct.current >= ct.target) {
-      add(new Hint('colonyTask', '蜂群任务完成了，去领取蜂王浆', 'new', 'panel:tasks', 'xf_nav_tasks'));
+      add(new Hint('colonyTask', '蜂群任务完成：到「任务」里领取蜂王浆奖励', 'new', 'panel:tasks', 'xf_nav_tasks'));
     }
     const up = upgradeReady(e);
     if (up.length > 0 && w.unlocked('t_first_forager') && !this.seen('upgrade')) {

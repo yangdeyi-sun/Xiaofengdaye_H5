@@ -59,7 +59,8 @@ export class ProductionService {
         bulk = 1.1;
       }
       const honey = used * baseShare * e.baseConvertRatio + used * (1 - baseShare) * this.conversionRatio() * bulk;
-      this.w.econ.addN(Res.Honey, honey, Reason.Process, 'brew');
+      const made = this.w.econ.addN(Res.Honey, honey, Reason.Process, 'brew');
+      this.w.dailyBump('honey', made);
       this.w.rates.nectarUse += used;
       this.w.rates.honeyIn += honey;
     }

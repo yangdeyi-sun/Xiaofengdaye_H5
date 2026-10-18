@@ -308,6 +308,7 @@ export class ThreatService {
     if (won) {
       e.phase = ThreatPhase.Cleared;
       this.w.s.run.threats.cleared += 1;
+      this.w.dailyBump('threat', 1);
       d.reward.forEach((r: RewardDef) => {
         const amt = e.type === ThreatType.Bear ? r.amount * (1 + this.w.s.run.season.cycleIndex * 0.3) : r.amount;
         this.w.econ.add(r.res, BigNum.of(amt), Reason.ThreatReward, e.eventId);

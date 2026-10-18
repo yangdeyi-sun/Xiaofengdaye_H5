@@ -1,6 +1,8 @@
 import { BigNum } from '../common/BigNum';
 import { checksum } from '../common/Rng';
 import { ALL_RES, ALL_ROLES } from './Types';
+import { defaultBreedPlan } from './NewGame';
+import { emptyDaily } from './DailyService';
 import {
   ColonySlot, ColonyState, FlowerField, GameMessage, GameState, HiveState, LedgerEntry, MapState, MetaState, RunState, RunStats, SeasonState,
   ThreatState
@@ -209,6 +211,25 @@ function num(v: number, def: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : def;
 }
 
+function repairDaily(m: MetaState): void {
+  const fresh = emptyDaily();
+  if (m.daily === undefined || m.daily === null || typeof m.daily !== 'object') { m.daily = fresh; return; }
+  const d = m.daily;
+  if (typeof d.day !== 'string') d.day = '';
+  if (typeof d.signedDay !== 'string') d.signedDay = '';
+  d.streak = Math.max(0, Math.min(7, Math.floor(num(d.streak, 0))));
+  d.bonusClaimed = d.bonusClaimed === true;
+  if (!Array.isArray(d.tasks)) d.tasks = [];
+  d.tasks = d.tasks.filter((t) => t !== null && typeof t === 'object' && typeof t.kind === 'string').slice(0, 3);
+  d.tasks.forEach((t) => {
+    t.target = Math.max(1, num(t.target, 1));
+    t.progress = Math.max(0, Math.min(t.target, num(t.progress, 0)));
+    t.reward = Math.max(0, num(t.reward, 60));
+    t.claimed = t.claimed === true;
+  });
+  if (d.counts === undefined || typeof d.counts !== 'object') d.counts = {};
+}
+
 /** 修复缺失/非法字段：保证不出现负数、NaN 和缺失结构 */
 export function repair(d: SaveDTO): void {
   const m = d.meta;
@@ -230,6 +251,7 @@ export function repair(d: SaveDTO): void {
     // 旧存档：已有进度时由 Guide.syncLegacy 把已经满足的介绍标为看过，避免一次弹出一长串
     m.introsSeen = m.featureUnlocks.length > 0 ? ['_legacy'] : [];
   }
+  repairDaily(m);
   if (m.codexFlowers === undefined) {
     m.codexFlowers = [];
   }
@@ -289,6 +311,15 @@ function repairRun(r: RunDTO): void {
     c.collapsed = false;
   }
   c.youngQueens = Math.max(0, Math.floor(num(c.youngQueens, 0)));
+  const plan = defaultBreedPlan();
+  if (c.plan === undefined || c.plan === null || typeof c.plan !== 'object') c.plan = plan;
+  c.plan.on = c.plan.on === true;
+  if (c.plan.weights === undefined || typeof c.plan.weights !== 'object') c.plan.weights = plan.weights;
+  ALL_ROLES.forEach((k: string) => {
+    c.plan.weights[k] = Math.max(0, Math.min(10, Math.round(num(c.plan.weights[k], plan.weights[k]))));
+  });
+  c.plan.reserve = Math.max(0, Math.min(0.9, num(c.plan.reserve, plan.reserve)));
+  c.plan.larvae = Math.max(0, Math.min(c.larvae, Math.floor(num(c.plan.larvae, 0))));
   c.queenAttempts = Math.max(0, Math.floor(num(c.queenAttempts, 0)));
   const validSeasons = ['tutorial', 'spring', 'summer', 'autumn', 'winterPrep', 'winter'];
   if (!r.season || validSeasons.indexOf(r.season.season) < 0) {
@@ -312,6 +343,13 @@ function repairRun(r: RunDTO): void {
   }
   if (st.autoLays === undefined) {
     st.autoLays = 0;
+  }
+  const bloom = r.map.bloom;
+  if (bloom !== undefined && (bloom === null || typeof bloom.fieldId !== 'string')) delete r.map.bloom;
+  else if (bloom !== undefined) {
+    bloom.until = num(bloom.until, 0);
+    bloom.nextAt = num(bloom.nextAt, r.time + 45);
+    bloom.count = Math.max(0, Math.floor(num(bloom.count, 0)));
   }
   r.map.fields.forEach((f: FlowerField) => {
     f.stock = Math.max(0, num(f.stock, 0));

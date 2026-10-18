@@ -170,6 +170,26 @@ export class BrowserSaveRepository {
     }
   }
 
+  /** 导入存档码前的进度，供“撤销导入”恢复 */
+  saveBeforeImport(text: string): boolean {
+    if (!this.touchWriter()) return false;
+    try { this.store.set(this.key('before-import'), text); return true; } catch { return false; }
+  }
+
+  loadBeforeImport(): DecodeResult {
+    try {
+      return decodeEnvelope(this.store.get(this.key('before-import')) ?? '');
+    } catch {
+      const result = new DecodeResult();
+      result.error = 'STORAGE_UNAVAILABLE';
+      return result;
+    }
+  }
+
+  clearBeforeImport(): void {
+    try { this.store.remove(this.key('before-import')); } catch { /* ignore */ }
+  }
+
   wipe(): void {
     if (!this.touchWriter()) return;
     try {

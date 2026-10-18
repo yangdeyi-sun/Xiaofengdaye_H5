@@ -89,7 +89,7 @@ const STATS: StatDef[] = [
   st('guard.warning', '威胁预警', 1, 0.5, 5, '倍'),
   st('pollinate.rate', '授粉效率', 1, 0.1, 50, '倍'),
   st('expand.costMul', '扩建成本', 1, 0.3, 2, '倍'),
-  st('global.offlineHours', '离线收益上限', 2, 1, 24, '小时'),
+  st('global.offlineHours', '离线收益上限', 8, 1, 12, '小时'),
   st('start.larvae', '开局幼虫', 0, 0, 50, '只')
 ];
 
@@ -279,8 +279,8 @@ const RESEARCH: ResearchDef[] = [
     costs: [c(H, 600, 1.6), c(Res.Jelly, 1, 1.6)], effects: [ef('storage.capacity', 'pct', 0.12)] },
   { id: 'r_pollen', name: '授粉学', desc: '授粉效率提高', maxLevel: 5,
     costs: [c(H, 500, 1.6), c(Res.Jelly, 1, 1.6)], effects: [ef('pollinate.rate', 'pct', 0.2)] },
-  { id: 'r_offline', name: '长效储备', desc: '离线收益上限延长半小时', maxLevel: 4,
-    costs: [c(H, 800, 1.6), c(Res.Jelly, 2, 1.5)], effects: [ef('global.offlineHours', 'add', 0.5)] }
+  { id: 'r_offline', name: '长效储备', desc: '每级延长1小时离线收益，最高12小时', maxLevel: 4,
+    costs: [c(H, 800, 1.6), c(Res.Jelly, 2, 1.5)], effects: [ef('global.offlineHours', 'add', 1)] }
 ];
 
 function tl(id: string, branch: string, name: string, desc: string, maxLevel: number, cost: number, branchReq: number,
@@ -414,11 +414,11 @@ export const DEFAULT_CONFIG: GameConfigDef = {
     lifespan: 1800,
     scoutSample: 4,
     holdCollectPerSec: 3,
-    flowerRecoverSec: 3,
+    flowerRecoverSec: 10,
     expandBaseWax: 18,
     expandRingGrowth: 2.4,
     expandCellGrowth: 1.07,
-    offlineBaseHours: 2,
+    offlineBaseHours: 8,
     offlineStep: 10,
     maxOfflineDays: 30
   },

@@ -4,6 +4,7 @@ declare const process: { argv: string[]; exit(code: number): never };
  */
 import { BigNum, formatBig } from '../common/BigNum';
 import { checksum } from '../common/Rng';
+import { decodeSaveCode, encodeSaveCode } from '../common/SaveCode';
 import { DEFAULT_CONFIG, validateConfig } from '../domain/GameConfig';
 import { createInitialState } from '../domain/NewGame';
 import { GameEngine } from '../domain/GameEngine';
@@ -39,8 +40,10 @@ ok(BigNum.of(3).sub(BigNum.of(5)).clamp0().isZero(), 'bignum clamp0');
 const big = BigNum.fromLog10(Math.log10(20) + 10000 * Math.log10(1.15));
 ok(big.e === 608, 'bignum fromLog10 huge', `${big.serialize()}`);
 ok(BigNum.parse(big.serialize()).cmp(big) === 0, 'bignum serialize roundtrip');
-ok(formatBig(BigNum.of(1500)) === '1.5K', 'format K', formatBig(BigNum.of(1500)));
-ok(formatBig(BigNum.of(2.5e9)) === '2.5B', 'format B', formatBig(BigNum.of(2.5e9)));
+ok(formatBig(BigNum.of(1500)) === '1500', 'format below 10k as integer', formatBig(BigNum.of(1500)));
+ok(formatBig(BigNum.of(12000)) === '1.2万', 'format 万', formatBig(BigNum.of(12000)));
+ok(formatBig(BigNum.of(2.5e9)) === '25亿', 'format 亿', formatBig(BigNum.of(2.5e9)));
+ok(formatBig(BigNum.of(30000)) === '3万', 'format trims trailing zero', formatBig(BigNum.of(30000)));
 ok(formatBig(big).indexOf('e608') > 0, 'format sci');
 ok(BigNum.of(1e20).add(BigNum.of(1)).cmp(BigNum.of(1e20)) === 0, 'bignum precision guard');
 ok(BigNum.parse('abc').isZero() && BigNum.parse('NaNe5').isZero(), 'bignum parse invalid -> 0');
@@ -185,7 +188,7 @@ const st2 = decodeEnvelope(text).state!;
 const eng2 = new GameEngine(DEFAULT_CONFIG, st2);
 const honeyBefore = eng2.w.econ.amount(Res.Honey);
 const rpt = eng2.settleOffline(3 * 3600, 'S1', '');
-ok(rpt !== null && rpt.credited === 2 * 3600 && rpt.truncated === 3600, 'offline capped 2h', rpt ? `${rpt.credited}/${rpt.truncated}` : 'null');
+ok(rpt !== null && rpt.credited === 3 * 3600 && rpt.truncated === 0, 'three-hour absence credited in full', rpt ? `${rpt.credited}/${rpt.truncated}` : 'null');
 ok(eng2.settleOffline(3 * 3600, 'S1', '') === null, 'offline idempotent by settlementId');
 ok(Object.keys(eng2.run.res).every((k) => !eng2.run.res[k].isNegative()), 'offline no negatives');
 ok(eng2.w.adults() >= eng.w.adults(), 'offline no deaths');
@@ -193,6 +196,23 @@ ok(eng2.run.threats.active.filter((e) => e.type === 'bear' && e.phase === 'activ
 const r0 = eng2.settleOffline(0, 'S2', '');
 ok(r0 !== null && r0.credited === 0, 'offline zero elapsed');
 void honeyBefore;
+
+const overnight = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'overnight', 0, 33));
+ok(overnight.w.attrs.get('global.offlineHours') === DEFAULT_CONFIG.economy.offlineBaseHours,
+  'offline attribute and economy defaults agree');
+const nightReport = overnight.settleOffline(8 * 3600, 'night', '');
+ok(nightReport?.credited === 8 * 3600 && nightReport.truncated === 0, 'eight-hour night credited in full');
+const cappedReport = overnight.settleOffline(10 * 3600, 'long-night', '');
+ok(cappedReport?.credited === 8 * 3600 && cappedReport.truncated === 2 * 3600, 'base offline cap is eight hours');
+overnight.run.research.r_offline = 4;
+overnight.w.attrs.recompute();
+const researchReport = overnight.settleOffline(13 * 3600, 'researched-night', '');
+ok(researchReport?.credited === 12 * 3600 && researchReport.truncated === 3600, 'max research credits twelve hours');
+overnight.w.adj['evolution.center'] = 1.1;
+overnight.w.attrs.recompute();
+ok(overnight.w.attrs.get('global.offlineHours') === 12, 'central evolution bonus still respects twelve-hour cap');
+const overnightReload = new GameEngine(DEFAULT_CONFIG, decodeEnvelope(encodeEnvelope(overnight.state, DEFAULT_CONFIG.configVersion, 0)).state!);
+ok(overnightReload.w.attrs.get('global.offlineHours') === 12, 'offline extension survives save and reload');
 
 // ---------- 首个建筑后低频敌害；没有守卫时只造成短暂、非致命干扰 ----------
 const guardGate = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'guard-gate', 0, 19));
@@ -451,13 +471,14 @@ if (legacyState !== null) {
   const field = flowers.run.map.fields[0];
   const initialStock = field.stock;
   for (let i = 0; i < 100 && field.stock > 0; i++) flowers.collect(field.fieldId, 10);
-  ok(field.stock === 0 && flowers.w.econ.num(Res.Nectar) <= initialStock + 1e-6,
+  // 连击最多 +50%，仍以花丛实际存量为基础
+  ok(field.stock === 0 && flowers.w.econ.num(Res.Nectar) <= initialStock * 1.5 + 1e-6,
     'manual harvest is bounded by actual flower stock');
   const nectar = flowers.w.econ.num(Res.Nectar);
   ok(!flowers.collect(field.fieldId, 1).ok && flowers.w.econ.num(Res.Nectar) === nectar,
     'empty flowers cannot create nectar');
   const remaining = flowers.map.recoveryRemaining(field);
-  ok(remaining > 0 && remaining <= DEFAULT_CONFIG.economy.flowerRecoverSec + 1e-6, 'flower recovery wait is short (about 3s)');
+  ok(remaining > 0 && remaining <= DEFAULT_CONFIG.economy.flowerRecoverSec + 1e-6, 'flower recovery wait matches the configured interval');
   for (let i = 0; i < 10; i++) flowers.step(0.1);
   ok(field.stock === 0 && flowers.map.recoveryRemaining(field) < remaining,
     'empty flowers wait through a visible recovery interval');
@@ -503,6 +524,95 @@ if (legacyState !== null) {
   ok(legacyGuide.state.meta.tutorialDone && legacyGuide.w.count(Bld.Storage) === 0,
     'first completed scout ends tutorial before storage is built');
   console.log(`Opening: brewery built, forager ${chain.run.stats.firstForagerAt.toFixed(1)}s, scout ${chain.run.stats.firstScoutAt.toFixed(1)}s`);
+}
+
+// ---------------- 繁育计划 ----------------
+{
+  const plan = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'plan', 0, 21));
+  ok(!plan.run.colony.plan.on && !plan.colony.planUnlocked(), 'breeding plan starts off and locked');
+  ok(!plan.setBreedPlan(true).ok, 'breeding plan cannot start before it unlocks');
+  const freeCell = () => plan.run.hive.cells.find((c) => c.unlocked && c.building === '')!;
+  plan.run.tasksDone.push('t_first_nectar', 't_first_house', 't_first_forager', 't_first_scout', 't_survive_winter');
+  [Bld.Brewery, Bld.ForagerRoom, Bld.ScoutRoom].forEach((b) => { freeCell().building = b; });
+  plan.run.colony.larvae = 1;
+  ok(plan.colony.planUnlocked() && plan.setBreedPlan(true).ok, 'breeding plan unlocks mid-game');
+  plan.run.res[Res.Honey] = BigNum.of(380);
+  for (let i = 0; i < 1200; i++) { plan.step(0.5); plan.run.res[Res.Nectar] = BigNum.of(200); }
+  ok(plan.w.adults() >= 5 && plan.w.role(Role.Forager) > plan.w.role(Role.Scout), 'breeding plan raises bees by ratio', plan.roleSummary());
+  ok(plan.run.colony.larvae >= 1, 'breeding plan leaves manually laid larvae alone');
+  ok(plan.w.econ.num(Res.Honey) + 1 >= plan.colony.planReserveHoney() * 0.9, 'breeding plan keeps the honey reserve');
+  const adults = plan.w.adults();
+  plan.settleOffline(1800, 'plan-offline', '');
+  ok(plan.w.adults() > adults || plan.w.population() >= plan.w.popCap(), 'breeding plan keeps breeding offline');
+  const saved = decodeEnvelope(encodeEnvelope(plan.state, DEFAULT_CONFIG.configVersion, 1)).state!;
+  ok(saved.run.colony.plan.on && saved.run.colony.plan.weights[Role.Forager] === 6, 'breeding plan survives save and load');
+}
+
+// ---------------- 手动采集：连击与蜜流花 ----------------
+{
+  const tap = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'tap', 0, 22));
+  const field = tap.run.map.fields[0];
+  field.stock = 1000;
+  tap.collect(field.fieldId, 1);
+  const single = tap.w.econ.num(Res.Nectar);
+  for (let i = 0; i < 30; i++) { tap.step(0.3); field.stock = 50; tap.collect(field.fieldId, 1); }
+  ok(tap.map.comboMultiplier() > 1.2, 'steady manual collecting builds a combo bonus', `${tap.map.comboMultiplier()}`);
+  for (let i = 0; i < 10; i++) tap.step(0.5);
+  ok(tap.map.comboMultiplier() === 1, 'combo resets after a pause');
+  ok(single > 0, 'first tap still collects nectar');
+  tap.state.meta.tutorialDone = true;
+  for (let i = 0; i < 1400 && tap.map.activeBloom() === null; i++) tap.step(0.1);
+  const bloom = tap.map.activeBloom();
+  ok(bloom !== null, 'a honey bloom opens after the tutorial');
+  if (bloom !== null) {
+    const honey = tap.w.econ.num(Res.Honey);
+    const r = tap.collect(bloom.fieldId, 1);
+    ok(r.ok && tap.w.econ.num(Res.Honey) >= honey + 19 && tap.map.activeBloom() === null, 'tapping a honey bloom grants honey once', r.message);
+  }
+  const reloaded = decodeEnvelope(encodeEnvelope(tap.state, DEFAULT_CONFIG.configVersion, 1)).state!;
+  ok(reloaded.run.map.bloom !== undefined && reloaded.run.map.bloom.nextAt > 0, 'honey bloom timer survives save and load');
+}
+
+// ---------------- 每日签到与目标 ----------------
+{
+  const dly = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'daily', 0, 23));
+  dly.ensureDay('2026-10-18');
+  ok(dly.daily.state.tasks.length === 3, 'three daily goals are generated');
+  const honey0 = dly.w.econ.num(Res.Honey);
+  ok(dly.dailySign().ok && dly.w.econ.num(Res.Honey) > honey0, 'daily sign-in grants honey');
+  ok(!dly.dailySign().ok, 'cannot sign in twice on the same day');
+  dly.ensureDay('2026-10-19');
+  ok(dly.daily.nextStreak() === 2 && dly.dailySign().ok && dly.daily.state.streak === 2, 'consecutive sign-ins build a streak');
+  dly.ensureDay('2026-10-21');
+  ok(dly.daily.nextStreak() === 1, 'a missed day restarts the streak');
+  const goals = dly.daily.state.tasks;
+  goals.forEach((t) => { dly.w.dailyBump(t.kind, t.target * 2); });
+  ok(goals.every((t) => t.progress === t.target), 'daily progress is capped at the target');
+  ok(!dly.dailyBonus().ok, 'daily bonus needs all goals claimed first');
+  goals.forEach((_t, i) => dly.dailyClaim(i));
+  const jelly = dly.w.econ.num(Res.Jelly);
+  ok(dly.dailyBonus().ok && dly.w.econ.num(Res.Jelly) >= jelly + 2 && !dly.dailyBonus().ok, 'daily bonus pays jelly once');
+  const days = decodeEnvelope(encodeEnvelope(dly.state, DEFAULT_CONFIG.configVersion, 1)).state!;
+  ok(days.meta.daily.day === '2026-10-21' && days.meta.daily.bonusClaimed, 'daily state survives save and load');
+  const manual = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'daily2', 0, 24));
+  manual.ensureDay('2026-10-18');
+  manual.daily.state.tasks[0] = { kind: 'collect', target: 5, progress: 0, claimed: false, reward: 60 };
+  for (let i = 0; i < 5; i++) manual.collect(manual.run.map.fields[0].fieldId, 1);
+  ok(manual.daily.state.tasks[0].progress === 5, 'manual collecting counts toward daily goals');
+}
+
+// ---------------- 存档码 ----------------
+{
+  const src = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'code', 0, 25));
+  for (let i = 0; i < 400; i++) src.step(0.5);
+  src.state.messages.push({ id: 9999, kind: 'info', text: '中文与表情🐝也要原样保留', at: 1 } as never);
+  const env = encodeEnvelope(src.state, DEFAULT_CONFIG.configVersion, 1);
+  const code = encodeSaveCode(env);
+  ok(code.startsWith('XFDY1-') && code.length < env.length, 'save code is shorter than the raw save', `${code.length}/${env.length}`);
+  ok(decodeSaveCode(code) === env, 'save code round-trips exactly');
+  ok(decodeSaveCode(`  请保存：${code}  `) === env, 'save code tolerates surrounding text');
+  ok(decodeSaveCode('XFDY1-AAAA') !== env && !decodeEnvelope(decodeSaveCode('XFDY1-AAAA') ?? '').ok, 'damaged save code is rejected');
+  ok(decodeSaveCode('hello') === null, 'random text is not a save code');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

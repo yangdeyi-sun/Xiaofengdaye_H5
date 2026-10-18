@@ -63,6 +63,7 @@ export const AUDIO_ALIASES: Record<string, string> = {
   tap: 'ui_tap', ui_tap_soft: 'ui_tap', ui_tab: 'ui_tap', ui_select: 'ui_tap', ui_open_panel: 'ui_tap',
   ui_close_panel: '', ui_toggle: 'ui_tap', ui_toggle_on: 'ui_tap', ui_toggle_off: 'ui_tap', ui_cancel: 'ui_tap',
   ui_save_ok: 'ui_confirm', ui_delete_warning: 'ui_error', ui_claim_reward: 'ui_reward',
+  egg: 'ui_confirm',
   // 玩家动作
   collect: 'act_collect', collect_flower: 'act_collect',
   build: 'act_build', build_room: 'act_build', expand: 'act_build', expand_hex: 'act_build', build_room_finish: '',

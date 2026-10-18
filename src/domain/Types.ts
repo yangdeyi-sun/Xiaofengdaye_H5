@@ -93,7 +93,9 @@ export enum Reason {
   Swarm = 'swarm',
   Talent = 'talent',
   Rollback = 'rollback',
-  Admin = 'admin_fix'
+  Admin = 'admin_fix',
+  Daily = 'daily_reward',
+  Bloom = 'honey_bloom'
 }
 
 export interface CostDef {

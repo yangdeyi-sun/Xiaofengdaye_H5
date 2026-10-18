@@ -2,11 +2,11 @@ import { setPlatform } from '../../platform/Platform';
 import { MiniGamePlatform } from '../../platform/minigame/MiniGamePlatform';
 import type { MiniGameApi } from '../../platform/minigame/MiniGameApi';
 import { DOUYIN_AD_UNITS } from '../../platform/minigame/adUnits';
-import { Sprites } from '../../scene/Sprites';
 import { GameSession } from '../GameSession';
-import { CanvasUI, type CanvasSurface, type Viewport } from './CanvasUI';
+import { FullCanvasUI } from '../ui/FullCanvasUI';
+import type { CanvasSurface, Viewport } from '../ui/VirtualDocument';
 
-interface Touch { clientX: number; clientY: number; }
+interface Touch { identifier: number; clientX: number; clientY: number; }
 interface TouchEvent { touches: Touch[]; changedTouches: Touch[]; }
 interface SystemInfo { windowWidth: number; windowHeight: number; pixelRatio: number; safeArea?: { top: number; bottom: number }; }
 interface DouyinHost extends MiniGameApi {
@@ -29,13 +29,10 @@ const viewport = (): Viewport => {
     top: info.safeArea?.top || 0, bottom: Math.max(0, info.windowHeight - (info.safeArea?.bottom ?? info.windowHeight)) };
 };
 session.init();
-session.lowPower = true;
-Sprites.bitmapState = 1;
-const ui = new CanvasUI(canvas, session, viewport());
-const point = (e: TouchEvent): Touch | undefined => e.changedTouches[0] || e.touches[0];
-tt.onTouchStart((e) => { const p = point(e); if (p) ui.touchStart(p.clientX, p.clientY); });
-tt.onTouchMove((e) => { const p = point(e); if (p) ui.touchMove(p.clientX, p.clientY); });
-tt.onTouchEnd((e) => { const p = point(e); if (p) ui.touchEnd(p.clientX, p.clientY); });
+const ui = new FullCanvasUI(canvas, session, viewport(), () => tt.createCanvas());
+tt.onTouchStart((e) => e.changedTouches.forEach((p) => ui.touchStart(p.clientX, p.clientY, p.identifier)));
+tt.onTouchMove((e) => e.changedTouches.forEach((p) => ui.touchMove(p.clientX, p.clientY, p.identifier)));
+tt.onTouchEnd((e) => e.changedTouches.forEach((p) => ui.touchEnd(p.clientX, p.clientY, p.identifier)));
 tt.onTouchCancel(() => ui.touchCancel());
 tt.onWindowResize?.(() => ui.resize(viewport()));
 tt.onHide(() => { ui.touchCancel(); session.onBackground(); });

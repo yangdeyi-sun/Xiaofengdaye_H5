@@ -267,6 +267,7 @@ export class ProgressionService {
     this.w.s.run.research[id] = lv + 1;
     this.w.attrs.recompute();
     this.w.emit('upgrade', 0, 0, `${r.name} Lv${lv + 1}`, 'hive');
+    this.w.dailyBump('upgrade', 1);
     return CmdResult.ok(`${r.name}完成 Lv${lv + 1}`);
   }
 

@@ -145,6 +145,7 @@ export class HiveService {
     this.recomputeAdjacency();
     this.w.msg('build', `建成${def.name}`);
     this.w.emit('build', c.q, c.r, def.name, 'hive');
+    this.w.dailyBump('build', 1);
     return CmdResult.ok(`建成${def.name}`);
   }
 
@@ -173,6 +174,7 @@ export class HiveService {
     }
     this.recomputeAdjacency();
     this.w.emit('expand', c.q, c.r, '扩建', 'hive');
+    this.w.dailyBump('build', 1);
     this.ensureFallDeadline();
     return CmdResult.ok('扩建成功');
   }
@@ -246,6 +248,7 @@ export class HiveService {
       }
     });
     this.w.emit('upgrade', 0, 0, `${t.name} Lv${lv + 1}`, 'hive');
+    this.w.dailyBump('upgrade', 1);
     return CmdResult.ok(`${t.name}升到 ${lv + 1} 级`);
   }
 
@@ -329,6 +332,42 @@ export class HiveService {
       out.push(c.ring <= 1 ? '靠近中心功能区：研究效果 +10%' : '靠近中心可提高研究效果');
     }
     return out;
+  }
+
+  /** 放置预览：把 type 放在这个空格能拿到的相邻加成（短标签，没有加成返回空） */
+  previewAdjacency(c: HexCell, type: string): string {
+    if (!c.unlocked || c.building.length > 0) return '';
+    const ns = this.neighbors(c);
+    const count = (b: string): number => ns.filter((n: HexCell) => n.building === b).length;
+    const maxRing = this.w.s.run.hive.ringLevel;
+    if (type === Bld.Nursery) return count(Bld.Queen) > 0 ? '孵化+20%' : '';
+    if (type === Bld.Brewery) {
+      const k = Math.min(2, count(Bld.Storage));
+      return k > 0 ? `加工+${k * 10}%` : '';
+    }
+    if (type === Bld.Storage) {
+      const parts: string[] = [];
+      if (count(Bld.Brewery) > 0) parts.push(`加工+${Math.min(2, count(Bld.Brewery)) * 10}%`);
+      if (count(Bld.Storage) > 0) parts.push('容量↑');
+      return parts.join(' ');
+    }
+    if (type === Bld.GuardRoom) return c.ring === maxRing && c.ring >= 2 ? '巡逻+25%' : '';
+    if (type === Bld.Evolution) return c.ring <= 1 ? '研究+10%' : '';
+    return '';
+  }
+
+  /** 巢格长按说明：这是什么、现在的状态和相邻加成 */
+  explainCell(c: HexCell): string[] {
+    if (!c.unlocked) {
+      if (this.canExpandCell(c)) return ['可扩建的格子', `消耗 ${Math.ceil(this.expandCost(c)[0].amount.toNumber())} 蜂蜡扩建，扩建后可以放巢房，还会提高人口上限。`];
+      if (!this.w.unlocked('t_build_storage')) return ['未开放的格子', '建成第一个储蜜格后才能用蜂蜡扩建。'];
+      return ['还不能扩建', c.ring > this.w.region().maxRing ? '已经到本种区的蜂巢上限。' : '只能扩建紧挨着现有蜂巢的格子，先扩建里面一圈。'];
+    }
+    if (c.building.length === 0) return ['空格', '可以放一个新的巢房。放置时，格子上的绿色字是放在这里能拿到的相邻加成。'];
+    const def = this.w.bldDef(c.building);
+    const out = [def.name, def.desc];
+    if (def.adjacency.length > 0 && def.adjacency !== '无') out.push(`布局：${def.adjacency}`);
+    return out.concat(this.describeCell(c));
   }
 
   buildingOptions(): BuildingDef[] {

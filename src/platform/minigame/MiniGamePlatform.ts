@@ -1,5 +1,6 @@
 import type {
-  AdBackend, AudioBackend, DrawableImage, ImageLoader, KeyValueStore, Platform, RewardedResult, SoundHandle
+  AdBackend, AudioBackend, ClipboardBackend, CloudSaveBackend, DrawableImage, ImageLoader, KeyValueStore, Platform,
+  RewardedResult, SoundHandle
 } from '../Platform';
 import type { AdUnitConfig } from './adUnits';
 import type {
@@ -78,7 +79,7 @@ class MiniImages implements ImageLoader {
       const image = this.api.createImage();
       image.onload = () => resolve(image as unknown as DrawableImage);
       image.onerror = (err) => reject(err instanceof Error ? err : new Error(`image ${path}`));
-      image.src = this.base + path.replace(/\.webp$/, `.${this.extension}`);
+      image.src = this.base + path.replace(/\.(webp|svg)$/, `.${this.extension}`);
     });
   }
 }
@@ -173,6 +174,30 @@ export interface MiniGamePlatformOptions {
   /** 资源根路径：留空表示包内资源；填 CDN 地址（以 / 结尾）则从远程加载 */
   assetBase?: string;
   imageExtension?: 'webp' | 'png';
+  /** 可选云存档实现（抖音云 / 自建服务） */
+  cloud?: CloudSaveBackend;
+}
+
+/** tt.setClipboardData / tt.getClipboardData；宿主不支持时返回失败，由界面改用存档码文本 */
+class MiniClipboard implements ClipboardBackend {
+  constructor(private readonly api: MiniGameApi) {}
+  write(text: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (typeof this.api.setClipboardData !== 'function') { resolve(false); return; }
+      try { this.api.setClipboardData({ data: text, success: () => resolve(true), fail: () => resolve(false) }); } catch { resolve(false); }
+    });
+  }
+  read(): Promise<string | null> {
+    return new Promise((resolve) => {
+      if (typeof this.api.getClipboardData !== 'function') { resolve(null); return; }
+      try {
+        this.api.getClipboardData({
+          success: (res?: unknown) => { const data = (res as { data?: unknown } | undefined)?.data; resolve(typeof data === 'string' ? data : null); },
+          fail: () => resolve(null)
+        });
+      } catch { resolve(null); }
+    });
+  }
 }
 
 export class MiniGamePlatform implements Platform {
@@ -181,6 +206,9 @@ export class MiniGamePlatform implements Platform {
   readonly audio: AudioBackend;
   readonly images: ImageLoader;
   readonly ads: AdBackend;
+  readonly clipboard: ClipboardBackend;
+  /** 云存档：接入抖音云或自建服务后在入口处传入；未传入时不显示云存档 */
+  readonly cloud?: CloudSaveBackend;
   private readonly api: MiniGameApi;
 
   constructor(options: MiniGamePlatformOptions) {
@@ -191,6 +219,8 @@ export class MiniGamePlatform implements Platform {
     this.audio = new MiniAudio(options.api, base);
     this.images = new MiniImages(options.api, base, options.imageExtension);
     this.ads = new MiniAds(options.api, options.adUnits);
+    this.clipboard = new MiniClipboard(options.api);
+    this.cloud = options.cloud;
   }
 
   vibrate(ms: number): void {

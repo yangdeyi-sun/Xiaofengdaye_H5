@@ -8,6 +8,7 @@ import { ColonyService } from './ColonyService';
 import { MapService } from './MapService';
 import { ProductionService, SeasonService } from './ProductionService';
 import { ThreatService } from './ThreatService';
+import { DailyService } from './DailyService';
 import { ProgressionService, SwarmPreview } from './ProgressionService';
 import { createRun } from './NewGame';
 import { cloneState } from './SaveCodec';
@@ -37,6 +38,7 @@ export class GameEngine {
   season: SeasonService;
   threats: ThreatService;
   prog: ProgressionService;
+  daily: DailyService;
   rateView: Rates = new Rates();
   dirty: boolean = false;
   /** 关键操作后请求保存（SAVE-005） */
@@ -59,6 +61,7 @@ export class GameEngine {
     this.season = new SeasonService(this.w);
     this.threats = new ThreatService(this.w);
     this.prog = new ProgressionService(this.w);
+    this.daily = new DailyService(this.w, () => this.estimateHoneyPerMin() / 60);
     this.season.onChange = (from: string, to: string) => {
       this.map.onSeasonChange();
       this.seasonLog.push(to);
@@ -258,6 +261,39 @@ export class GameEngine {
 
   setAuto(lay: boolean, hatch: boolean): void {
     this.colony.setAuto(lay, hatch);
+    this.saveRequested = true;
+  }
+
+  /** 平台层每秒传入玩家本地日期；跨天时刷新每日目标 */
+  ensureDay(day: string): void {
+    if (this.daily.ensure(day)) this.saveRequested = true;
+  }
+
+  dailySign(): CmdResult {
+    return this.done(this.daily.sign());
+  }
+
+  dailyClaim(index: number): CmdResult {
+    return this.done(this.daily.claim(index));
+  }
+
+  dailyBonus(): CmdResult {
+    return this.done(this.daily.claimBonus());
+  }
+
+  setBreedPlan(on: boolean): CmdResult {
+    const r = this.colony.setPlan(on);
+    if (r.ok) this.saveRequested = true;
+    return r;
+  }
+
+  setPlanWeight(role: string, v: number): void {
+    this.colony.setPlanWeight(role, v);
+    this.saveRequested = true;
+  }
+
+  setPlanReserve(v: number): void {
+    this.colony.setPlanReserve(v);
     this.saveRequested = true;
   }
 

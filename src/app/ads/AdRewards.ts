@@ -74,3 +74,46 @@ export function grantSwarmBonus(engine: GameEngine, extra: number): void {
   engine.w.msg('swarm', `分蜂加成：额外获得 ${extra} 传承点。`);
   engine.saveRequested = true;
 }
+
+/** 春季补给：度过冬天后的春季，每轮四季可领一次 */
+export function springSupplyWanted(engine: GameEngine): boolean {
+  const season = engine.run.season;
+  if (!season.formal || season.season !== SeasonId.Spring || season.wintersSurvived <= 0) return false;
+  return (engine.run.stats.springSupplyCycle ?? -1) !== season.cycleIndex;
+}
+
+export function springSupplyAmount(engine: GameEngine): number {
+  const cap = engine.w.econ.capacity(Res.Honey).toNumber();
+  return Math.max(AD_REWARDS.springSupplyMinHoney, Math.round(cap * AD_REWARDS.springSupplyRatio));
+}
+
+export function grantSpringSupply(engine: GameEngine): number {
+  if (!springSupplyWanted(engine)) return 0;
+  engine.run.stats.springSupplyCycle = engine.run.season.cycleIndex;
+  const amount = springSupplyAmount(engine);
+  const accepted = engine.w.econ.addN(Res.Honey, amount, REASON, 'spring_supply');
+  engine.w.msg('info', `春暖花开，邻巢送来 ${Math.round(amount)} 蜂蜜帮你重整旗鼓。`);
+  engine.saveRequested = true;
+  return accepted;
+}
+
+/** 补齐差额：只差蜂蜜、且差得不多时返回差额（向上取整），否则 0 */
+export function honeyTopUp(engine: GameEngine, costs: { res: string; amount: BigNum }[]): number {
+  let honeyNeed = 0;
+  for (const cost of costs) {
+    const have = engine.w.econ.num(cost.res);
+    const need = cost.amount.toNumber();
+    if (cost.res === Res.Honey) honeyNeed = need;
+    else if (have + 1e-9 < need) return 0;
+  }
+  if (engine.w.econ.capacity(Res.Honey).toNumber() < honeyNeed) return 0;
+  const short = honeyNeed - engine.w.econ.num(Res.Honey);
+  if (short <= 0 || short > honeyNeed * AD_REWARDS.topUpMaxRatio) return 0;
+  return Math.ceil(short - 1e-9);
+}
+
+export function grantHoneyTopUp(engine: GameEngine, amount: number): number {
+  const accepted = engine.w.econ.addN(Res.Honey, amount, REASON, 'honey_topup');
+  engine.saveRequested = true;
+  return accepted;
+}

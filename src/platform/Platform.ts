@@ -56,6 +56,24 @@ export interface AdBackend {
   showInterstitial(placement: string): Promise<boolean>;
 }
 
+/** 系统剪贴板：用于复制 / 粘贴存档码 */
+export interface ClipboardBackend {
+  write(text: string): Promise<boolean>;
+  /** 读取失败（无权限、平台不支持）返回 null，界面会改用输入框 */
+  read(): Promise<string | null>;
+}
+
+/**
+ * 云存档后端（可选）。需要服务端或抖音云配合（登录换取玩家身份、按玩家保存一份存档）；
+ * 未配置时游戏只提供本机存档 + 存档码，不会假装已经云同步。
+ */
+export interface CloudSaveBackend {
+  /** 界面显示的名称，如“抖音云存档” */
+  readonly label: string;
+  upload(saveText: string): Promise<{ ok: boolean; message: string }>;
+  download(): Promise<{ ok: boolean; message: string; saveText: string; savedAt: number }>;
+}
+
 export interface Platform {
   /** 'web' | 'douyin' | 'taptap' … */
   readonly name: string;
@@ -64,6 +82,8 @@ export interface Platform {
   readonly images: ImageLoader;
   readonly ads: AdBackend;
   vibrate(ms: number): void;
+  readonly clipboard?: ClipboardBackend;
+  readonly cloud?: CloudSaveBackend;
   /** 尝试固定屏幕方向；原生壳保证可用，普通浏览器受系统权限限制时返回 false。 */
   setOrientation?(orientation: 'auto' | 'landscape' | 'portrait'): Promise<boolean>;
   /** 单调时钟（毫秒） */

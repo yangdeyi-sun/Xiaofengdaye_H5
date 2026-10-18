@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | 规则与存档 | `src/domain` | 同一份内核 |
 | 地图与蜂巢 | `SceneRenderer` | 同一渲染器 |
-| 界面 | `CanvasUI`，无 DOM | `BrowserUI`，离线 WebView |
+| 界面 | 共用完整版 `GameUI` + `styles.css`，`FullCanvasUI` 画布宿主，无 DOM | 同一份 `GameUI` + `styles.css`，离线 WebView |
 | 图片与声音 | `MiniGamePlatform` | `WebPlatform` |
 | 存储 | `tt` 本地存储 | 应用 WebView 本地存储 |
 | 前后台 | `tt.onHide/onShow` | Activity 转发 `pagehide/pageshow` |

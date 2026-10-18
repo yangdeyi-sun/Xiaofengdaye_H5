@@ -9,6 +9,11 @@ export const SCOUT_RETURN = 'return';
 export const SCOUT_DANCE = 'dance';
 export const SCOUT_PATROL = 'patrol';
 
+/** 连击判定窗口（秒） */
+const COMBO_WINDOW = 1.5;
+/** 蜜流花开放时长（秒） */
+const BLOOM_LIFETIME = 20;
+
 /** 侦察蜂可完整模拟的最大逻辑实体数，其余按聚合加速 */
 const MAX_SCOUT_AGENTS = 40;
 
@@ -43,10 +48,13 @@ export class MapService {
     }
     const fd = this.w.flower(f.flower);
     if (f.stock <= 1e-6) {
+      const late = this.pickBloom(f);
+      if (late > 0) return CmdResult.ok(`采到蜜流花！直接获得 ${Math.round(late)} 蜂蜜${this.honeyFullNote()}`);
       return CmdResult.fail('MAP_RECOVERING', `花丛正在恢复，约${Math.ceil(this.recoveryRemaining(f))}秒后重新开放`);
     }
     let gain = 0;
     let collected = 0;
+    const now = this.w.s.run.time;
     for (let i = 0; i < Math.max(0, Math.floor(times)); i++) {
       const take = Math.min(f.stock, this.w.attrs.get('manual.yield'));
       if (take <= 1e-6) break;
@@ -55,17 +63,99 @@ export class MapService {
       collected++;
     }
     this.markDepleted(f);
+    // 连击：1.5 秒内连续采集，每 10 次多 10% 花蜜，最多 +50%
+    this.w.comboCount = now - this.w.comboAt <= COMBO_WINDOW ? this.w.comboCount + collected : collected;
+    this.w.comboAt = now;
+    const comboMul = this.comboMultiplier();
+    gain *= comboMul;
     const got = this.w.econ.addN(Res.Nectar, gain, Reason.Manual, fieldId);
     this.w.s.run.stats.manualCollects += collected;
+    this.w.dailyBump('collect', collected);
     this.w.rates.manualIn += gain;
     if (this.w.s.run.stats.firstNectarAt < 0) {
       this.w.s.run.stats.firstNectarAt = this.w.s.run.time;
     }
-    this.w.emit('collect', f.x, f.y, `+${gain >= 10 ? Math.round(gain) : gain.toFixed(1)}`, 'field');
+    const amount = `+${gain >= 10 ? Math.round(gain) : gain.toFixed(1)}`;
+    this.w.emit('collect', f.x, f.y, comboMul > 1 ? `${amount} 连击×${this.w.comboCount}` : amount, 'field');
+    const burst = this.pickBloom(f);
+    if (burst > 0) {
+      return CmdResult.ok(`采到蜜流花！直接获得 ${Math.round(burst)} 蜂蜜${this.honeyFullNote()}`);
+    }
     if (got < gain - 0.01) {
       return CmdResult.ok('花蜜仓已满');
     }
     return CmdResult.ok('');
+  }
+
+  /** 当前连击加成倍率 */
+  comboMultiplier(): number {
+    if (this.w.s.run.time - this.w.comboAt > COMBO_WINDOW) return 1;
+    return 1 + Math.min(0.5, Math.floor(this.w.comboCount / 10) * 0.1);
+  }
+
+  // ---------------- 蜜流花 ----------------
+  private honeyFullNote(): string {
+    return this.w.econ.fillRatio(Res.Honey) >= 0.999 ? '（蜂蜜仓已满，多出的存入溢出缓冲）' : '';
+  }
+
+  /** 当前开放的蜜流花所在花田；没有则返回 null */
+  activeBloom(): FlowerField | null {
+    const b = this.w.s.run.map.bloom;
+    if (b === undefined || b.fieldId.length === 0 || b.until <= this.w.s.run.time) return null;
+    return this.w.field(b.fieldId);
+  }
+
+  bloomRemaining(): number {
+    const b = this.w.s.run.map.bloom;
+    return b === undefined || b.fieldId.length === 0 ? 0 : Math.max(0, b.until - this.w.s.run.time);
+  }
+
+  /** 蜜流花奖励：约 30 秒的全巢采集量折成蜂蜜，至少 20 */
+  bloomReward(): number {
+    const nectarRate = this.estimateNectarRate() + this.w.attrs.get('manual.yield') * 2;
+    return Math.max(20, Math.round(nectarRate * 0.5 * 30));
+  }
+
+  private pickBloom(f: FlowerField): number {
+    const b = this.w.s.run.map.bloom;
+    if (b === undefined || b.fieldId !== f.fieldId || b.until <= this.w.s.run.time) return 0;
+    const reward = this.bloomReward();
+    this.w.econ.addN(Res.Honey, reward, Reason.Bloom, `bloom:${f.fieldId}`);
+    this.w.dailyBump('bloom', 1);
+    b.fieldId = '';
+    b.nextAt = this.w.s.run.time + this.bloomInterval(b.count);
+    this.w.emit('bloom', f.x, f.y, `蜜流花 +${Math.round(reward)} 蜂蜜`, 'field');
+    return reward;
+  }
+
+  private bloomInterval(n: number): number {
+    // 75~135 秒一次，确定性伪随机（不打乱其他系统的随机序列）
+    const h = Math.sin((this.w.s.run.seed % 9973) * 12.9898 + n * 78.233) * 43758.5453;
+    return 75 + (h - Math.floor(h)) * 60;
+  }
+
+  private bloomTick(): void {
+    if (this.w.offline || !this.w.s.meta.tutorialDone) return;
+    const m = this.w.s.run.map;
+    const t = this.w.s.run.time;
+    if (m.bloom === undefined) m.bloom = { fieldId: '', until: 0, nextAt: t + 45, count: 0 };
+    const b = m.bloom;
+    if (b.fieldId.length > 0) {
+      if (t >= b.until) {
+        b.fieldId = '';
+        b.nextAt = t + this.bloomInterval(b.count);
+      }
+      return;
+    }
+    if (t < b.nextAt || this.w.isWinter()) return;
+    // 只开在看得见、采得到的花丛上：蜂巢附近或侦察有效、且有花蜜
+    const choices = m.fields.filter((f: FlowerField) => f.discovered && f.stock > 1 && (f.home || (this.intelValid(f) && f.dist <= 360)));
+    if (choices.length === 0) { b.nextAt = t + 20; return; }
+    const pick = choices[(b.count * 7 + Math.floor(t)) % choices.length];
+    b.count += 1;
+    b.fieldId = pick.fieldId;
+    b.until = t + BLOOM_LIFETIME;
+    this.w.emit('reveal', pick.x, pick.y, '蜜流花开了', 'field');
   }
 
   // ---------------- 侦察蜂状态机 ----------------
@@ -533,6 +623,7 @@ export class MapService {
     this.foragingTick(dt);
     this.regenTick(dt);
     this.pollinationTick(dt);
+    this.bloomTick();
   }
 
   /** 预估采集产能（升级预览用，不修改状态） */

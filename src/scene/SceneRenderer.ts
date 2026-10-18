@@ -746,6 +746,21 @@ export class SceneRenderer {
     return best;
   }
 
+  /** 命中还没探明的花田（带锁云朵），用于点击时给出说明 */
+  hitFog(sx: number, sy: number, w: number, h: number): string {
+    const wx = this.screenToWorldX(sx, w);
+    const wy = this.screenToWorldY(sy, h);
+    const range = this.eng.w.attrs.get('scout.range');
+    let best = '';
+    let bestD = 1e9;
+    this.eng.run.map.fields.forEach((f: FlowerField) => {
+      if (f.discovered || f.hidden || f.dist > range * 1.15) return;
+      const d = Math.hypot(f.x - wx, f.y - (wy + 8));
+      if (d < Math.max(40, 32 / this.cam.zoom) && d < bestD) { bestD = d; best = f.fieldId; }
+    });
+    return best;
+  }
+
   // ------------------------------------------------------------ 巢外视图
   private ensureDecor(): void {
     const region = this.eng.w.region();
@@ -900,6 +915,38 @@ export class SceneRenderer {
       }
       this.drawFieldPatch(ctx, f, z, range);
     });
+    // 蜜流花：金色光环 + 倒计时，提示玩家去点
+    const bloom = eng.map.activeBloom();
+    if (bloom !== null) {
+      const pulse = 0.5 + 0.5 * Math.sin(t * 6);
+      const r = 30 + 10 * bloom.level;
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,200,40,0.95)';
+      ctx.shadowBlur = 18 + pulse * 14;
+      ctx.strokeStyle = `rgba(255,214,70,${0.7 + 0.3 * pulse})`;
+      ctx.lineWidth = 4 / Math.max(0.6, z);
+      ctx.beginPath();
+      ctx.arc(bloom.x, bloom.y - 6, r + pulse * 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      for (let i = 0; i < 6; i++) {
+        const a = t * 1.6 + i / 6 * Math.PI * 2;
+        ctx.fillStyle = 'rgba(255,236,140,0.95)';
+        ctx.beginPath();
+        ctx.arc(bloom.x + Math.cos(a) * (r + 8), bloom.y - 6 + Math.sin(a) * (r + 8) * 0.7, 2.6 / Math.max(0.6, z), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const k = 1 / Math.max(0.7, z);
+      ctx.font = font(13 * k, true);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const label = `蜜流花 ${Math.ceil(eng.map.bloomRemaining())}秒`;
+      ctx.lineWidth = 4 * k;
+      ctx.strokeStyle = 'rgba(80,45,0,0.85)';
+      ctx.strokeText(label, bloom.x, bloom.y - r - 22 * k);
+      ctx.fillStyle = '#FFE16B';
+      ctx.fillText(label, bloom.x, bloom.y - r - 22 * k);
+    }
     // 蜂群远景层
     const adults = eng.w.adults();
     if (adults >= 6) {
@@ -1870,6 +1917,20 @@ export class SceneRenderer {
       }
       if (this.focusCell(c) || placeable) {
         this.drawFocusRing(ctx, x, y, S * 0.8);
+      }
+      // 放置预览：在空格上写出放在这里能拿到的相邻加成
+      if (placeable) {
+        const bonus = eng.hive.previewAdjacency(c, this.placing);
+        if (bonus.length > 0) {
+          ctx.font = font(Math.max(10, S * 0.24), true);
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(20,60,20,0.75)';
+          ctx.strokeText(bonus, x, y);
+          ctx.fillStyle = '#B8F5A0';
+          ctx.fillText(bonus, x, y);
+        }
       }
     });
     // 摇摆舞：8 字舞路径

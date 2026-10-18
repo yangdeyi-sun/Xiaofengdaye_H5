@@ -4,7 +4,8 @@ import { DEFAULT_CONFIG, validateConfig } from '../domain/GameConfig';
 import { GameEngine } from '../domain/GameEngine';
 import { Guide } from '../domain/Guide';
 import { createInitialState, createRun } from '../domain/NewGame';
-import { cloneState, encodeEnvelope } from '../domain/SaveCodec';
+import { cloneState, decodeEnvelope, encodeEnvelope } from '../domain/SaveCodec';
+import { decodeSaveCode, encodeSaveCode } from '../common/SaveCode';
 import type { GameMessage, GameState, OfflineReport } from '../domain/State';
 import { ALL_RES, Res, Role, SeasonId } from '../domain/Types';
 import type { FxEvent } from '../domain/World';
@@ -26,6 +27,12 @@ export const AWAY_REPORT_SEC = 30;
 const SEASON_NAMES: Record<string, string> = {
   tutorial: '新手春季', spring: '春季', summer: '夏季', autumn: '秋季', winterPrep: '冬季将至', winter: '冬季'
 };
+/** 玩家本地日期 YYYY-MM-DD：每日签到与目标按本地零点刷新 */
+export function localDay(at: number = TimeService.now()): string {
+  const d = new Date(at);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function seasonName(id: string): string { return SEASON_NAMES[id] ?? id; }
 
 export interface StatusCardData {
@@ -146,6 +153,7 @@ export class GameSession {
     }
     this.useState(state);
     if (!isNew) this.settleOffline();
+    this.engine().ensureDay(localDay());
     this.status = 'ready';
     this.saveNow();
   }
@@ -258,6 +266,7 @@ export class GameSession {
     this.uiTimer += dt;
     if (this.uiTimer >= 0.25) {
       this.uiTimer = 0;
+      engine.ensureDay(localDay());
       this.collectNotices();
       this.refreshAudioScene();
       this.audio.tick();
@@ -473,6 +482,7 @@ export class GameSession {
     this.seenMessageId = state.nextMessageId;
     this.notices = [];
     this.applySettings();
+    this.eng.ensureDay(localDay());
   }
 
   recoverColonyWithPoint(): boolean {
@@ -495,6 +505,79 @@ export class GameSession {
     if (this.recoverColonyWithPoint()) return true;
     this.eng.state.meta.inheritance.available -= 1;
     return false;
+  }
+
+  // ---------------- 存档码 / 云存档 ----------------
+  /** 导出当前进度为存档码（先保存一次，保证是最新进度） */
+  exportSaveCode(): string {
+    if (this.eng === null) return '';
+    this.saveNow();
+    return encodeSaveCode(encodeEnvelope(this.eng.state, DEFAULT_CONFIG.configVersion, TimeService.now()));
+  }
+
+  /** 校验存档码；成功时返回解出的存档，失败返回原因 */
+  checkSaveCode(code: string): { ok: boolean; message: string; state: GameState | null } {
+    const text = decodeSaveCode(code);
+    if (text === null) return { ok: false, message: '这不是小峰大业的存档码，请完整复制以 XFDY1- 开头的整串文字', state: null };
+    return this.checkSaveText(text);
+  }
+
+  private checkSaveText(text: string): { ok: boolean; message: string; state: GameState | null } {
+    const decoded = decodeEnvelope(text);
+    if (!decoded.ok || decoded.state === null) {
+      const reason: Record<string, string> = {
+        NEWER_SCHEMA: '这个存档来自更新的版本，请先更新游戏',
+        CHECKSUM: '存档码不完整或被改动过，请重新复制',
+        EMPTY: '存档码不完整，请重新复制'
+      };
+      return { ok: false, message: reason[decoded.error] ?? '存档码无法读取，请重新复制', state: null };
+    }
+    return { ok: true, message: '', state: decoded.state };
+  }
+
+  /** 用存档替换当前进度；导入前的进度单独保留一份，可以撤销 */
+  importSaveState(state: GameState): boolean {
+    if (this.eng === null) return false;
+    const current = this.eng.state;
+    this.repo.saveBeforeImport(encodeEnvelope(current, DEFAULT_CONFIG.configVersion, TimeService.now()));
+    // 保留本机的隐私同意与设置，避免导入后被要求重新同意
+    state.meta.settings.privacyAccepted = current.meta.settings.privacyAccepted;
+    state.meta.settings.privacyVersion = current.meta.settings.privacyVersion;
+    // 导入时不结算离线收益，防止“导出-等待-导入”反复刷离线奖励
+    state.lastSavedAt = TimeService.now();
+    this.useState(state);
+    this.pendingOffline = null;
+    this.awaySince = 0;
+    return this.saveNow();
+  }
+
+  hasBeforeImport(): boolean { return this.repo.loadBeforeImport().ok; }
+
+  undoImport(): boolean {
+    const decoded = this.repo.loadBeforeImport();
+    if (!decoded.ok || decoded.state === null || this.eng === null) return false;
+    decoded.state.lastSavedAt = TimeService.now();
+    this.useState(decoded.state);
+    this.repo.clearBeforeImport();
+    return this.saveNow();
+  }
+
+  /** 云存档：上传当前进度 */
+  async cloudUpload(): Promise<{ ok: boolean; message: string }> {
+    const cloud = platform().cloud;
+    if (cloud === undefined || this.eng === null) return { ok: false, message: '当前平台还没有开通云存档' };
+    this.saveNow();
+    return cloud.upload(encodeEnvelope(this.eng.state, DEFAULT_CONFIG.configVersion, TimeService.now()));
+  }
+
+  /** 云存档：下载并校验，交给界面确认后再导入 */
+  async cloudDownload(): Promise<{ ok: boolean; message: string; state: GameState | null; savedAt: number }> {
+    const cloud = platform().cloud;
+    if (cloud === undefined) return { ok: false, message: '当前平台还没有开通云存档', state: null, savedAt: 0 };
+    const got = await cloud.download();
+    if (!got.ok) return { ok: false, message: got.message, state: null, savedAt: 0 };
+    const checked = this.checkSaveText(got.saveText);
+    return { ok: checked.ok, message: checked.message, state: checked.state, savedAt: got.savedAt };
   }
 
   restoreWinterCheckpoint(): boolean {

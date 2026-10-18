@@ -2,8 +2,9 @@ import { BigNum } from '../common/BigNum';
 import { Rng } from '../common/Rng';
 import { ForageStrategy, GameConfigDef, GuardPriority, RegionDef, Res, Role, SeasonId, ALL_RES } from './Types';
 import { buildHive } from './HiveService';
+import { emptyDaily } from './DailyService';
 import {
-  ColonyState, FlowerField, GameState, InheritanceState, MapState, MetaState, RunState, RunStats, SeasonState,
+  BreedPlan, ColonyState, FlowerField, GameState, InheritanceState, MapState, MetaState, RunState, RunStats, SeasonState,
   SettingsState, ThreatState
 } from './State';
 
@@ -43,6 +44,16 @@ function flowerTier(cfg: GameConfigDef, id: string): number {
 }
 
 /** 可复现种子生成花田（MAP-008）；越远产量越高、危险越大（MAP-002） */
+/** 繁育计划默认值：采集为主，兼顾酿蜜、侦察和守卫 */
+export function defaultBreedPlan(): BreedPlan {
+  const weights: Record<string, number> = {};
+  weights[Role.Forager] = 6;
+  weights[Role.House] = 3;
+  weights[Role.Scout] = 1;
+  weights[Role.Guard] = 1;
+  return { on: false, weights: weights, reserve: 0.3, larvae: 0 };
+}
+
 export function generateFields(cfg: GameConfigDef, region: RegionDef, rng: Rng): FlowerField[] {
   const out: FlowerField[] = [];
   // 两处近处花丛：开局即可手动采集，永久有效
@@ -118,7 +129,7 @@ export function createRun(cfg: GameConfigDef, regionId: string, regionIndex: num
     larvae: startLarvae, roles: roles, injured: injured, batches: [], nextBatchId: 1, layCooldown: 0,
     autoLay: false, autoHatch: false, autoRatio: ratio, houseWaxShare: 0.25, forageStrategy: ForageStrategy.Balanced,
     pollinators: {}, guardPriority: GuardPriority.Balanced, eggsLaid: 0, hatched: 0, lifeDebt: 0, collapsed: false,
-    youngQueens: 0, queenAttempts: 0
+    youngQueens: 0, queenAttempts: 0, plan: defaultBreedPlan()
   };
   const map: MapState = { fields: generateFields(cfg, region, rng), scouts: [], nextScoutId: 1 };
   const season: SeasonState = {
@@ -149,7 +160,8 @@ export function createInitialState(cfg: GameConfigDef, playerId: string, now: nu
   const meta: MetaState = {
     playerId: playerId, createdAt: now, totalPlayTime: 0, swarmCount: 0, regionsVisited: [cfg.regions[0].id],
     codexFlowers: [], codexThreats: [], achievements: [], skins: ['classic'], inheritance: inh, settings: settings,
-    tutorialStep: 0, tutorialDone: false, history: [], totalWinters: 0, featureUnlocks: [], introsSeen: []
+    tutorialStep: 0, tutorialDone: false, history: [], totalWinters: 0, featureUnlocks: [], introsSeen: [],
+    daily: emptyDaily()
   };
   const gs: GameState = {
     meta: meta, run: createRun(cfg, cfg.regions[0].id, 0, seed, 0), activeColonyId: 'colony-0', colonies: [],

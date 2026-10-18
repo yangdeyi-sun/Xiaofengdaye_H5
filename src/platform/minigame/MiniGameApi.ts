@@ -77,6 +77,8 @@ export interface MiniGameApi {
   createRewardedVideoAd(options: { adUnitId: string; multiton?: boolean }): MiniRewardedVideoAd;
   createInterstitialAd?(options: { adUnitId: string }): MiniInterstitialAd;
   getPerformance?(): MiniPerformance;
+  setClipboardData?(options: { data: string } & MiniCallbackOptions): void;
+  getClipboardData?(options: MiniCallbackOptions): void;
   onShow(callback: (res?: unknown) => void): void;
   onHide(callback: () => void): void;
 }

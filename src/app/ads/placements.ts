@@ -18,7 +18,9 @@ export const AdPlacement = {
   BearAid: 'bear_aid',
   WinterSupply: 'winter_supply',
   ColonyRevive: 'colony_revive',
-  SwarmBonus: 'swarm_bonus'
+  SwarmBonus: 'swarm_bonus',
+  SpringSupply: 'spring_supply',
+  HoneyTopUp: 'honey_topup'
 } as const;
 
 export const AD_PLACEMENTS: AdPlacementDef[] = [
@@ -27,7 +29,9 @@ export const AD_PLACEMENTS: AdPlacementDef[] = [
   { id: AdPlacement.BearAid, name: '邻巢援军', dailyLimit: 3, cooldownSec: 0 },
   { id: AdPlacement.WinterSupply, name: '紧急补给', dailyLimit: 2, cooldownSec: 300 },
   { id: AdPlacement.ColonyRevive, name: '蜂群重振', dailyLimit: 1, cooldownSec: 0 },
-  { id: AdPlacement.SwarmBonus, name: '分蜂加成', dailyLimit: 3, cooldownSec: 0 }
+  { id: AdPlacement.SwarmBonus, name: '分蜂加成', dailyLimit: 3, cooldownSec: 0 },
+  { id: AdPlacement.SpringSupply, name: '春季补给', dailyLimit: 3, cooldownSec: 0 },
+  { id: AdPlacement.HoneyTopUp, name: '补齐差额', dailyLimit: 6, cooldownSec: 60 }
 ];
 
 /** 奖励数值 */
@@ -44,7 +48,12 @@ export const AD_REWARDS = {
   winterSupplyRatio: 0.3,
   winterSupplyMinHoney: 80,
   /** 分蜂加成：额外获得本次传承点的比例 */
-  swarmBonusRatio: 0.5
+  swarmBonusRatio: 0.5,
+  /** 春季补给：熬过冬天后，每个春天可领一次，蜂蜜容量的比例，至少 springSupplyMinHoney */
+  springSupplyRatio: 0.25,
+  springSupplyMinHoney: 100,
+  /** 补齐差额：只在只差蜂蜜、且差额不超过所需蜂蜜的这个比例时提供 */
+  topUpMaxRatio: 0.4
 };
 
 /** 插屏广告节奏 */

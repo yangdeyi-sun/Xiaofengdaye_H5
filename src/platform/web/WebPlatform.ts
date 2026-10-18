@@ -1,5 +1,5 @@
 import type {
-  AdBackend, AudioBackend, DrawableImage, ImageLoader, KeyValueStore, Platform, RewardedResult, SoundHandle
+  AdBackend, ClipboardBackend, AudioBackend, DrawableImage, ImageLoader, KeyValueStore, Platform, RewardedResult, SoundHandle
 } from '../Platform';
 import { NativeBridgeAds, detectNativeBridge } from './NativeBridgeAds';
 import { UnavailableAds } from '../UnavailableAds';
@@ -69,6 +69,15 @@ class WebAudio implements AudioBackend {
 class WebImages implements ImageLoader {
   constructor(private readonly base: string) {}
   async load(path: string): Promise<DrawableImage> {
+    if (path.endsWith('.svg')) {
+      // createImageBitmap does not decode SVG consistently across browsers; the image element does.
+      return new Promise<DrawableImage>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image as unknown as DrawableImage);
+        image.onerror = () => reject(new Error(`image ${path}`));
+        image.src = this.base + path;
+      });
+    }
     const response = await fetch(this.base + path);
     if (!response.ok) throw new Error(`${response.status} ${path}`);
     return createImageBitmap(await response.blob());
@@ -165,12 +174,36 @@ class WebMockAds implements AdBackend {
   }
 }
 
+/** 浏览器 / 安卓 WebView 剪贴板：读不到时界面改用输入框粘贴 */
+class WebClipboard implements ClipboardBackend {
+  async write(text: string): Promise<boolean> {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch { /* 权限被拒绝时退回到下面的方法 */ }
+    try {
+      const area = document.createElement('textarea');
+      area.value = text; area.setAttribute('readonly', ''); area.style.position = 'fixed'; area.style.opacity = '0';
+      document.body.appendChild(area); area.select();
+      const ok = document.execCommand('copy');
+      area.remove();
+      return ok;
+    } catch { return false; }
+  }
+  async read(): Promise<string | null> {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) return await navigator.clipboard.readText();
+    } catch { /* 没有读取权限 */ }
+    return null;
+  }
+}
+
 export class WebPlatform implements Platform {
   readonly name: string;
   readonly storage = new WebStorage();
   readonly audio = new WebAudio();
   readonly images: ImageLoader;
   readonly ads: AdBackend;
+  readonly clipboard: ClipboardBackend = new WebClipboard();
 
   /**
    * @param assetBase 美术资源根路径

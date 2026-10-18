@@ -204,24 +204,30 @@ export class BigNum {
   }
 }
 
-const UNITS: string[] = ['', 'K', 'M', 'B', 'T', 'Qa', 'Qi', 'Sx', 'Sp', 'Oc', 'No', 'Dc'];
+/** 中文计数单位：每 4 位进一级（万、亿、万亿、亿亿） */
+const UNITS: string[] = ['', '万', '亿', '万亿', '亿亿'];
 
-/** 显示层格式化：K/M/B... 超出后科学计数法 */
+function trimFixed(n: number, digits: number): string {
+  return n.toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+}
+
+/** 显示层格式化：一万以内显示整数（10 以下保留一位小数），之后用 万/亿/万亿，再大用科学计数法 */
 export function formatBig(v: BigNum, digits: number = 1): string {
   if (v.m === 0) {
     return '0';
   }
-  if (v.e < 3) {
+  if (v.e < 4) {
     const n = v.toNumber();
     if (Math.abs(n) < 10 && Math.abs(n - Math.round(n)) > 0.05) {
       return n.toFixed(1);
     }
     return `${Math.floor(n)}`;
   }
-  const group = Math.floor(v.e / 3);
+  const group = Math.floor(v.e / 4);
   if (group < UNITS.length) {
-    const scaled = v.m * Math.pow(10, v.e - group * 3);
-    return `${scaled.toFixed(scaled >= 100 ? 0 : digits)}${UNITS[group]}`;
+    const scaled = v.m * Math.pow(10, v.e - group * 4);
+    // 1.2万、12.3万、123万、1234万：最多 4 位有效数字以内
+    return `${trimFixed(scaled, scaled >= 100 ? 0 : digits)}${UNITS[group]}`;
   }
   return `${v.m.toFixed(2)}e${v.e}`;
 }
