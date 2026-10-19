@@ -3,6 +3,7 @@ import { FlowerField, HexCell, LarvaBatch, ScoutAgent, ThreatEvent } from '../do
 import { ForageAlloc, FxEvent } from '../domain/World';
 import { Bld, Res, ResearchDef, Role, SeasonId, SkinDef, ThreatType } from '../domain/Types';
 import { Rng } from '../common/Rng';
+import { RealmView, realmExtent, realmView } from '../domain/RealmService';
 import {
   drawBear, drawBee, drawBuildingIcon, drawFlower, drawMoth, drawSkep, drawSpike, drawWasp, drawWeb, font, hexPath,
   roundRect
@@ -867,7 +868,7 @@ export class SceneRenderer {
     this.camAnim = 0;
     this.cam.x -= dx / this.cam.zoom;
     this.cam.y -= dy / this.cam.zoom;
-    const lim = this.eng.w.region().maxRadius + 120;
+    const lim = Math.max(this.eng.w.region().maxRadius + 120, realmExtent(this.eng.state) + 160);
     this.cam.x = Math.max(-lim, Math.min(lim, this.cam.x));
     this.cam.y = Math.max(-lim, Math.min(lim, this.cam.y));
   }
@@ -1077,6 +1078,8 @@ export class SceneRenderer {
     Sprites.warm('atlas_skep');
   }
 
+  private realmCache: RealmView | null = null;
+
   private seasonTint(): string {
     const s = this.eng.run.season.season;
     if (s === SeasonId.Winter) {
@@ -1173,6 +1176,10 @@ export class SceneRenderer {
         }
       });
     }
+    // 王国地图：各蜂巢的领地（不规则色块）与领地外的花田
+    const realm = realmView(eng.state, eng.w.cfg);
+    this.realmCache = realm;
+    if (realm !== null) this.drawRealmUnder(ctx, realm, z, vx0, vx1, vy0, vy1);
     // 侦察范围
     const range = eng.w.attrs.get('scout.range');
     if (eng.w.count(Bld.ScoutRoom) > 0) {
@@ -1253,6 +1260,7 @@ export class SceneRenderer {
     if (this.focus === 'hiveIcon') {
       this.drawFocusRing(ctx, 0, -2, 54);
     }
+    if (realm !== null) this.drawRealmHives(ctx, realm, z, t);
     // 授粉蜂（驻守花田）
     const poll = eng.run.colony.pollinators;
     const bo = new DrawOpts();
@@ -1761,6 +1769,119 @@ export class SceneRenderer {
   }
 
   /** 胡蜂王头上的小王冠 */
+  /** 领地色：当前蜂巢金色，其它蜂巢依次取色 */
+  private realmColor(i: number, active: boolean): string {
+    if (active) return '242,183,5';
+    const pal = ['80,160,240', '235,110,150', '150,110,235', '60,180,120', '240,140,60', '90,190,200'];
+    return pal[i % pal.length];
+  }
+
+  private drawRealmUnder(ctx: CanvasRenderingContext2D, realm: RealmView, z: number, vx0: number, vx1: number, vy0: number, vy1: number): void {
+    realm.hives.forEach((hv, i) => {
+      const col = this.realmColor(i, hv.active);
+      ctx.beginPath();
+      hv.outline.forEach((p, k) => { if (k === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]); });
+      ctx.closePath();
+      ctx.fillStyle = `rgba(${col},${hv.active ? 0.07 : 0.06})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(${col},${hv.active ? 0.75 : 0.55})`;
+      ctx.lineWidth = (hv.active ? 3 : 2.2) / z;
+      // 原始蜂巢的领地用实线，分出去的蜂巢用虚线
+      if (hv.daughter) ctx.setLineDash([14 / z, 9 / z]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+    // 领地外的花田：画淡一点，只能看不能采
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    realm.foreign.forEach((f) => {
+      if (f.x < vx0 - 60 || f.x > vx1 + 60 || f.y < vy0 - 60 || f.y > vy1 + 60) return;
+      const fd = this.eng.w.flower(f.flower);
+      for (let k = 0; k < 5; k++) {
+        const a = k / 5 * Math.PI * 2 + f.x * 0.01;
+        drawFlower(ctx, f.x + Math.cos(a) * 12, f.y + Math.sin(a) * 8, 7, fd.petal, fd.center, 5, 0);
+      }
+    });
+    ctx.restore();
+  }
+
+  /** 其它蜂巢：原始蜂巢更大、头顶王冠；分出去的蜂巢小一号、插一面彩色小旗；下方写蜂巢名字 */
+  private drawRealmHives(ctx: CanvasRenderingContext2D, realm: RealmView, z: number, t: number): void {
+    const ko = new DrawOpts();
+    ko.align = 'bottom';
+    realm.hives.forEach((hv, i) => {
+      const col = this.realmColor(i, hv.active);
+      const scale = hv.daughter ? 0.8 : 1.12;
+      if (!hv.active) {
+        if (!Sprites.draw(ctx, 'atlas_skep', 'normal', t + i, hv.x, hv.y + 30 * scale, 66 * scale, ko)) {
+          drawSkep(ctx, hv.x, hv.y, scale, 0);
+        }
+        // 几只在巢口进出的蜜蜂
+        const n = Math.min(6, 2 + Math.floor(hv.adults / 15));
+        for (let k = 0; k < n; k++) {
+          const a = t * (0.9 + k * 0.13) + k * 1.7;
+          const r = 34 + 14 * Math.sin(t * 0.7 + k);
+          drawBee(ctx, hv.x + Math.cos(a) * r, hv.y - 8 + Math.sin(a) * r * 0.6, 0.7, a + Math.PI / 2, t * 40 + k, 'forager', false, z > 0.8);
+        }
+      }
+      const top = hv.y - (hv.active ? 44 : 44 * scale);
+      if (!hv.daughter) {
+        this.drawCrown(ctx, hv.x, top - 6);
+      } else {
+        // 小旗：旗杆 + 彩色三角旗
+        ctx.strokeStyle = '#6B4A22';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(hv.x + 14, top + 8);
+        ctx.lineTo(hv.x + 14, top - 16);
+        ctx.stroke();
+        ctx.fillStyle = `rgb(${col})`;
+        ctx.beginPath();
+        ctx.moveTo(hv.x + 14, top - 16);
+        ctx.lineTo(hv.x + 30, top - 11 + Math.sin(t * 3 + i) * 2);
+        ctx.lineTo(hv.x + 14, top - 6);
+        ctx.closePath();
+        ctx.fill();
+      }
+      const k = 1 / Math.max(0.65, z);
+      ctx.font = font(12 * k, true);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const label = hv.active ? `${hv.name}（当前）` : hv.name;
+      const ly = hv.y + 42 * (hv.active ? 1 : scale) + 8 * k;
+      ctx.lineWidth = 4 * k;
+      ctx.strokeStyle = 'rgba(40,25,5,0.8)';
+      ctx.strokeText(label, hv.x, ly);
+      ctx.fillStyle = hv.active ? '#FFE16B' : '#FFFFFF';
+      ctx.fillText(label, hv.x, ly);
+    });
+  }
+
+  /** 点到地图上的其它蜂巢：返回它的蜂群编号 */
+  hitRealmHive(sx: number, sy: number, w: number, h: number): string {
+    const realm = this.realmCache;
+    if (realm === null) return '';
+    const wx = this.screenToWorldX(sx, w);
+    const wy = this.screenToWorldY(sy, h);
+    let best = '';
+    let bestD = Math.max(46, 36 / this.cam.zoom);
+    realm.hives.forEach((hv) => {
+      if (hv.active) return;
+      const d = Math.hypot(hv.x - wx, hv.y - 10 - wy);
+      if (d < bestD) { bestD = d; best = hv.id; }
+    });
+    return best;
+  }
+
+  /** 镜头移到地图上的某个蜂巢 */
+  lookAtHive(id: string): boolean {
+    const hv = this.realmCache?.hives.find((x) => x.id === id);
+    if (hv === undefined) return false;
+    this.stopFollow();
+    this.lookAt(hv.x, hv.y);
+    return true;
+  }
+
   private drawCrown(ctx: CanvasRenderingContext2D, x: number, y: number): void {
     ctx.fillStyle = '#FFD54A';
     ctx.strokeStyle = '#8C5A00';

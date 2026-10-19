@@ -28,6 +28,7 @@ import { LUCKY_HATCHES, STAR_MAX_LEVEL, STAR_TRAITS, starTrait } from '../domain
 import type { NamedBee } from '../domain/State';
 import { legacyAura } from '../domain/World';
 import { costMulFor } from '../domain/HiveService';
+import { HIVE_NAME_MAX } from '../domain/HiveNames';
 import { BEAR_DESTROY_CHANCE, POWER_PER_CYCLE } from '../domain/ThreatService';
 import type { WatchResult } from './ads/AdService';
 import { PresentationQueue } from './PresentationQueue';
@@ -87,10 +88,16 @@ const SEASON_ICONS: Record<string, string> = {
 
 const NAV: Record<string, [string, string]> = {
   tasks: ['任务', 'xf_nav_tasks'], build: ['建造', 'xf_action_build'], colony: ['蜂群', 'xf_nav_swarm'],
-  colonies: ['蜂群切换', 'xf_nav_swarm'],
+  hub: ['蜂巢', 'xf_nav_hive'], fields: ['花田', 'xf_flower_wild'],
+  colonies: ['王国', 'xf_nav_swarm'],
   eco: ['生态', 'xf_nav_ecology'], evolution: ['进化', 'xf_nav_evolution'], swarm: ['分蜂', 'xf_nav_split'],
   resources: ['资源', 'xf_nav_resources'], codex: ['图鉴', 'xf_action_search'], settings: ['设置', 'xf_nav_settings']
 };
+
+/** 侧边栏分组：花田页把花田类排在前面，蜂巢页把蜂巢类排在前面 */
+const NAV_FIELD = ['fields', 'eco'];
+const NAV_HIVE = ['hub', 'build', 'colony', 'evolution', 'swarm', 'colonies'];
+const NAV_GENERAL_TAIL = ['resources', 'codex', 'settings'];
 
 function h(value: unknown): string {
   return String(value ?? '')
@@ -144,6 +151,10 @@ function button(action: string, label: string, options: {
   return `<button type="button" class="${classes}" data-action="${h(action)}"${options.id === undefined ? '' : ` data-id="${h(options.id)}"`}${options.value === undefined ? '' : ` data-value="${h(options.value)}"`}${options.disabled ? ' disabled' : ''}${options.title === undefined ? '' : ` title="${h(options.title)}"`}>${label}</button>`;
 }
 function panelCard(body: string, danger = false): string { return `<section class="panel-card${danger ? ' danger-card' : ''}">${body}</section>`; }
+/** 把提示文字归成一类：去掉引号里的名字和数字，只取开头几个字 */
+function normalizeTopic(text: string): string {
+  return text.replace(/[「“"（(][^」”"）)]*[」”"）)]/g, '').replace(/[0-9０-９.,，%+\-×]+/g, '#').slice(0, 6);
+}
 function clock(seconds: number): string {
   const s = Math.max(0, Math.ceil(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -170,6 +181,11 @@ export class GameUI {
   private eventModal = false;
   /** 已经自动弹过的季节事件（每个事件只自动弹一次） */
   private eventPromptKey = '';
+  /** 取名弹窗：正在取名的蜂群编号、输入框里的文字、预设名序号 */
+  private nameTarget = '';
+  private nameDraft = '';
+  private nameSeed = 0;
+  private nameError = '';
   private rosterTab = 'all';
   private swarmTarget = '';
   private hiddenHint = '';
@@ -249,7 +265,11 @@ export class GameUI {
 
   mount(): void {
     this.root.addEventListener('click', (event) => this.onClick(event));
-    this.root.addEventListener('input', (event) => this.onRange(event, false));
+    this.root.addEventListener('input', (event) => {
+      const target = event.target as HTMLInputElement | null;
+      if (target !== null && target.classList?.contains('name-input')) { this.nameDraft = target.value; this.nameError = ''; return; }
+      this.onRange(event, false);
+    });
     this.root.addEventListener('scroll', () => { this.lastScrollAt = Date.now(); }, { capture: true, passive: true });
     this.root.addEventListener('change', (event) => this.onRange(event, true));
     this.root.addEventListener('pointerdown', (event) => {
@@ -737,6 +757,9 @@ export class GameUI {
     if (this.drawerOpen) this.closePanel(false);
     if (id.length === 0) {
       this.selectedField = '';
+      // 点到王国地图上的其它蜂巢：切换过去经营
+      const other = this.session.renderer?.hitRealmHive(this.downX, this.downY, this.canvasWidth, this.canvasHeight) ?? '';
+      if (other.length > 0) { this.confirmSwitchHive(other); return; }
       const fog = this.session.renderer?.hitFog(this.downX, this.downY, this.canvasWidth, this.canvasHeight) ?? '';
       if (fog.length > 0) {
         const e = this.engine();
@@ -867,12 +890,18 @@ export class GameUI {
     if (this.toastText.length > 0 && now >= this.toastUntil) this.toastText = '';
     let notice = this.session.popNotice();
     while (notice !== null) {
-      if (notice.kind === 'season' && this.engine().state.meta.settings.eventAnimations) {
-        this.showEvent(seasonName(this.engine().run.season.season), notice.text,
-          seasonIcon(this.engine().run.season.season), 2600);
-      } else if (notice.kind === 'error' && notice.text.includes('熊')) {
-        this.showEvent('蜂巢被熊摧毁', notice.text, 'xf_enemy_bear', 6000);
-      } else if (!(notice.kind === 'threat' && notice.text.includes('熊'))) this.showBanner(notice.text, notice.kind);
+      if (notice.kind === 'error') {
+        // 毁巢、坠落这类重大损失每次都要让玩家看到
+        if (notice.text.includes('熊')) this.showEvent('蜂巢被熊摧毁', notice.text, 'xf_enemy_bear', 6000);
+        else this.showBanner(notice.text, notice.kind);
+      } else if (notice.kind === 'threat' && notice.text.includes('熊')) {
+        // 熊有专门的强制弹窗
+      } else if (this.allowAuto(this.noticeTopic(notice))) {
+        if (notice.kind === 'season' && this.engine().state.meta.settings.eventAnimations) {
+          this.showEvent(seasonName(this.engine().run.season.season), notice.text,
+            seasonIcon(this.engine().run.season.season), 2600);
+        } else this.showBanner(notice.text, notice.kind);
+      }
       notice = this.session.popNotice();
     }
     const renderer = this.session.renderer;
@@ -882,16 +911,25 @@ export class GameUI {
       renderer.placing = this.placing;
       renderer.focus = now < this.focusUntil ? this.focusTarget : this.autoFocus();
       const banners = renderer.takeBanners();
-      banners.forEach((text) => this.showBanner(text, 'milestone'));
+      banners.forEach((text) => { if (this.allowAuto(`fx:${normalizeTopic(text)}`)) this.showBanner(text, 'milestone'); });
     }
     this.syncPresentation();
+    // 取名：新手交接后的第一个蜂巢、每次分蜂出来的新蜂巢
+    const pendingName = (this.engine().state.meta.namePending ?? [])[0];
+    if (pendingName !== undefined && this.nameTarget.length === 0 && !this.automaticPresentationBlocked() &&
+      this.presentations.empty && this.session.guide().seen('handover')) {
+      this.openNaming(pendingName);
+    }
     // 季节事件：玩家空闲时自动弹出一次；“稍后再说”后只保留顶部事件条
     const seasonEvent = this.engine().events.active();
     if (seasonEvent !== null && seasonEvent.key !== this.eventPromptKey && !this.automaticPresentationBlocked() &&
       this.presentations.empty && this.engine().events.view() !== null) {
       this.eventPromptKey = seasonEvent.key;
-      this.eventModal = true;
-      this.session.audio.play('codex_new');
+      // 只有第一次季节事件自动弹出，之后只留顶部事件条
+      if (this.allowAuto('auto:seasonEvent')) {
+        this.eventModal = true;
+        this.session.audio.play('codex_new');
+      }
     }
     if (!this.automaticPresentationBlocked() && this.presentations.empty) {
       const topic = this.session.guide().pendingIntro();
@@ -901,6 +939,30 @@ export class GameUI {
         this.session.audio.play('codex_new');
       }
     }
+  }
+
+  /** 提示类别：消息自带类别优先，否则按文字推断（去掉数字和名字） */
+  private noticeTopic(notice: GameMessage): string {
+    return notice.topic !== undefined && notice.topic.length > 0 ? notice.topic : `${notice.kind}:${normalizeTopic(notice.text)}`;
+  }
+
+  /**
+   * 自动弹窗只在第一次出现时弹：同类提示弹过一次后，之后只进消息记录（顶部事件条、角标照常）。
+   * 新手阶段（引导没结束或正式四季还没开始）不受限制，多给一点引导。
+   */
+  private allowAuto(topic: string): boolean {
+    const e = this.engine();
+    const meta = e.state.meta;
+    if (!Array.isArray(meta.popupsSeen)) meta.popupsSeen = [];
+    const seen = meta.popupsSeen.includes(topic);
+    if (!seen) {
+      meta.popupsSeen.push(topic);
+      if (meta.popupsSeen.length > 400) meta.popupsSeen.splice(0, meta.popupsSeen.length - 400);
+      e.saveRequested = true;
+    }
+    // 只有第一次游玩、正式四季开始之前算新手季节（之后的新蜂群、重开的蜂巢不算）
+    const novice = !meta.tutorialDone || (!e.run.season.formal && meta.totalWinters === 0 && meta.swarmCount === 0);
+    return novice || !seen;
   }
 
   private showBanner(text: string, kind: string): void {
@@ -921,7 +983,7 @@ export class GameUI {
     return this.pointers.size > 0 || this.rangeActive || this.panel.length > 0 || this.drawerOpen ||
       this.placing.length > 0 || this.movingCell.length > 0 || this.introId.length > 0 ||
       this.offlineReport !== null || this.confirmState !== null || this.legal.length > 0 ||
-      this.boostModal || this.swarmBonus > 0 || this.bearModal || this.eventModal || this.session.ads.busy ||
+      this.boostModal || this.swarmBonus > 0 || this.bearModal || this.eventModal || this.nameTarget.length > 0 || this.session.ads.busy ||
       Date.now() < this.introGapUntil || Date.now() < this.toastUntil;
   }
 
@@ -1012,6 +1074,9 @@ export class GameUI {
     const scrim = this.root.querySelector<HTMLElement>('#drawer-scrim');
     game?.classList.toggle('drawer-open', this.drawerOpen);
     drawer?.classList.toggle('open', this.drawerOpen);
+    // 花田页、蜂巢页的侧边栏用两套外观
+    drawer?.classList.toggle('view-field', this.view === 'field');
+    drawer?.classList.toggle('view-hive', this.view !== 'field');
     scrim?.classList.toggle('visible', this.drawerOpen);
     this.setHtml('#top-bar', this.renderTopBar());
     this.setHtml('#prod-strip', this.renderProdStrip());
@@ -1036,7 +1101,9 @@ export class GameUI {
     const handle = this.root.querySelector<HTMLElement>('#drawer-handle');
     if (handle !== null) {
       const badge = this.badgeCount();
-      handle.innerHTML = `${icon('xf_nav_comb')}<span>${this.drawerOpen ? '›' : '‹'}</span>${badge > 0 ? `<b>${badge}</b>` : ''}`;
+      handle.innerHTML = `${icon(this.view === 'field' ? 'xf_flower_wild' : 'xf_nav_comb')}<span>${this.drawerOpen ? '›' : '‹'}</span>${badge > 0 ? `<b>${badge}</b>` : ''}`;
+      handle.classList.toggle('view-field', this.view === 'field');
+      handle.classList.toggle('view-hive', this.view !== 'field');
       handle.setAttribute('aria-label', this.drawerOpen ? '收起功能面板' : '打开功能面板');
     }
     this.setHtml('#runtime-overlays', this.renderRuntimeOverlays());
@@ -1334,7 +1401,18 @@ export class GameUI {
     if (e.w.unlocked('t_build_storage')) out.push('resources');
     if (e.w.unlocked('t_first_egg')) out.push('codex');
     out.push('settings');
-    return out;
+    if (e.w.unlocked('t_first_nectar')) out.push('hub');
+    if (e.run.map.fields.some((f) => f.discovered)) out.push('fields');
+    const groups = this.navGroups(out);
+    return ['tasks', ...groups[0].items, ...groups[1].items, ...groups[2].items];
+  }
+
+  /** 侧边栏三组：当前页面所属的一组在前（花田页：花田组；蜂巢页：蜂巢组），通用功能在最后 */
+  private navGroups(available: string[]): Array<{ id: string; label: string; items: string[] }> {
+    const field = { id: 'field', label: '花田', items: NAV_FIELD.filter((k) => available.includes(k)) };
+    const hive = { id: 'hive', label: '蜂巢', items: NAV_HIVE.filter((k) => available.includes(k)) };
+    const general = { id: 'general', label: '通用', items: NAV_GENERAL_TAIL.filter((k) => available.includes(k)) };
+    return this.view === 'field' ? [field, hive, general] : [hive, field, general];
   }
 
   private navBadge(key: string): boolean {
@@ -1349,11 +1427,20 @@ export class GameUI {
 
   private badgeCount(): number { return this.dockItems().filter((key) => this.navBadge(key)).length; }
 
+  /** 打开侧边栏时默认的面板：花田页看花田一览，蜂巢页看蜂巢 */
+  private defaultPanel(): string {
+    return this.view === 'field' && this.dockItems().includes('fields') ? 'fields' : 'hub';
+  }
+
   private renderDrawerNav(): string {
-    return this.dockItems().map((key) => {
+    const items = this.dockItems();
+    const item = (key: string, group: string): string => {
       const [label, itemIcon] = NAV[key];
-      return `<button type="button" class="nav-item${this.panel === key ? ' active' : ''}" data-action="open-panel" data-id="${key}">${icon(itemIcon)}<span>${h(label)}</span>${this.navBadge(key) ? '<i></i>' : ''}</button>`;
-    }).join('');
+      return `<button type="button" class="nav-item nav-${group}${this.panel === key ? ' active' : ''}" data-action="open-panel" data-id="${key}">${icon(itemIcon)}<span>${h(label)}</span>${this.navBadge(key) ? '<i></i>' : ''}</button>`;
+    };
+    const groups = this.navGroups(items).filter((g) => g.items.length > 0)
+      .map((g) => `<p class="nav-group nav-group-${g.id}">${h(g.label)}</p>${g.items.map((k) => item(k, g.id)).join('')}`).join('');
+    return `${item('tasks', 'general')}${groups}`;
   }
 
   private panelFrame(title: string, frameIcon: string, body: string): string {
@@ -1362,6 +1449,7 @@ export class GameUI {
 
   private renderPanel(): string {
     if (this.panel === 'hub') return this.renderHubPanel();
+    if (this.panel === 'fields') return this.renderFieldsPanel();
     if (this.panel === 'queen') return this.renderQueenPanel();
     if (this.panel === 'tasks') return this.renderTaskPanel();
     if (this.panel === 'build') return this.renderBuildListPanel();
@@ -1626,6 +1714,40 @@ export class GameUI {
     return out;
   }
 
+  /** 花田一览：本蜂巢已知的花田、存量、驻守与敌害，以及采集路线策略 */
+  private renderFieldsPanel(): string {
+    const e = this.engine();
+    const known = e.run.map.fields.filter((f) => f.discovered)
+      .sort((a, b) => Number(b.home) - Number(a.home) || a.dist - b.dist);
+    const threats = e.threats.activeList();
+    const rows = known.map((f) => {
+      const def = e.w.flower(f.flower);
+      const max = e.map.maxStock(f);
+      const ratio = Math.min(1, f.stock / Math.max(1, max));
+      const poll = e.run.colony.pollinators[f.fieldId] ?? 0;
+      const danger = threats.some((t) => t.targetId === f.fieldId) ? ' · ⚠ 有敌害' : '';
+      const alloc = e.w.alloc.find((a) => a.fieldId === f.fieldId);
+      const state = !f.home && !e.map.intelValid(f) ? ' · 信息过期' : '';
+      return `<div class="field-row"><span>${icon(flowerIcon(f.flower))}<b>${h(def.name)}${f.home ? '（巢旁）' : ''}</b><span class="daily-bar"><i style="width:${Math.round(ratio * 100)}%"></i></span><small>存量 ${Math.floor(f.stock)}/${Math.floor(max)} · 采集蜂 ${Math.round(alloc?.bees ?? 0)}${poll > 0 ? ` · 驻守 ${poll}` : ''}${danger}${state}</small></span>${button('open-field', '查看', { id: f.fieldId })}</div>`;
+    }).join('');
+    const strategy = e.run.colony.forageStrategy;
+    const strategyButtons = [
+      [ForageStrategy.Safe, '安全近路'], [ForageStrategy.Balanced, '均衡'], [ForageStrategy.Rich, '高产远路']
+    ].map(([id, label]) => button('set-strategy', label, { id, primary: strategy === id })).join('');
+    const idle = e.w.forageIdle >= 1 ? `<p class="warning">${Math.floor(e.w.forageIdle)} 只采集蜂没有可去的花田${e.run.realm !== undefined ? '：领地里的花被采得太快，可以升级花丛、种新花，或往别的种区分蜂' : ''}</p>` : '';
+    return this.panelFrame('花田一览', 'xf_flower_wild', `<p class="muted">已发现 ${known.length} 片花田 · 采集蜂 ${e.w.role(Role.Forager)} 只 · 驻守授粉 ${e.map.pollinatorTotal()} 只</p>${idle}${rows}<hr><h3 class="section-title">采集路线策略</h3><div class="choice-row">${strategyButtons}</div><p class="muted">安全近路减少受伤；高产远路收益更高但更危险。点「查看」可以安排驻守授粉。</p>`);
+  }
+
+  /** 授粉成长进度 */
+  private pollProgress(field: FlowerField): string {
+    const e = this.engine();
+    const def = e.w.flower(field.flower);
+    if (def.next.length === 0) return '<p class="muted">已经是最高级的花田，驻守只会加快恢复。</p>';
+    const need = e.map.growthNeeded(field);
+    const ratio = Math.min(1, field.growth / Math.max(0.001, need));
+    return `<div class="daily-task"><span><b>成长为${h(e.w.flower(def.next).name)}</b><span class="daily-bar"><i style="width:${Math.round(ratio * 100)}%"></i></span><small>${Math.round(ratio * 100)}%</small></span></div>`;
+  }
+
   private renderFieldPanel(): string {
     const e = this.engine();
     const field = e.w.field(this.selectedField);
@@ -1636,7 +1758,7 @@ export class GameUI {
     const pollUnlocked = e.w.unlocked('t_build_storage') && e.w.role(Role.Forager) > 1;
     const poll = e.run.colony.pollinators[field.fieldId] ?? 0;
     const maxPoll = Math.max(1, Math.min(30, Math.floor(e.w.active(Role.Forager) * 0.5)));
-    return this.panelFrame(def.name, flowerIcon(field.flower), `${expired ? `<p class="warning">${icon('xf_field_expired')} 信息已过期</p>` : ''}${withered ? `<p class="muted">${icon('xf_field_withered')} ${e.run.season.season === SeasonId.Winter ? '冬季休眠：花蜜几乎不再恢复' : '花蜜快被采空了，可以等待恢复或寻找更多花源'}</p>` : ''}${this.fieldLines(field).map((line) => `<p>${h(line)}</p>`).join('')}${button('collect-field', e.map.recoveryRemaining(field) > 0 ? `恢复中 ${Math.ceil(e.map.recoveryRemaining(field))}秒` : '采集一次', { primary: true, disabled: e.map.recoveryRemaining(field) > 0 })}${pollUnlocked ? `<hr><h3 class="section-title">${icon('xf_talent_e_pollen')} 授粉特化：驻守 ${poll} 只采集蜂</h3>${this.range('pollinators', field.fieldId, poll, 0, maxPoll, 1, '驻守采集蜂')}<p class="muted">驻守的采集蜂不运蜜，但会提高花田恢复速度并让它成长为更高级的花田（会吸引更强敌害）。</p>` : ''}`);
+    return this.panelFrame(def.name, flowerIcon(field.flower), `${expired ? `<p class="warning">${icon('xf_field_expired')} 信息已过期</p>` : ''}${withered ? `<p class="muted">${icon('xf_field_withered')} ${e.run.season.season === SeasonId.Winter ? '冬季休眠：花蜜几乎不再恢复' : '花蜜快被采空了，可以等待恢复或寻找更多花源'}</p>` : ''}${this.fieldLines(field).map((line) => `<p>${h(line)}</p>`).join('')}${button('collect-field', e.map.recoveryRemaining(field) > 0 ? `恢复中 ${Math.ceil(e.map.recoveryRemaining(field))}秒` : '采集一次', { primary: true, disabled: e.map.recoveryRemaining(field) > 0 })}${pollUnlocked ? `<hr><h3 class="section-title">${icon('xf_talent_e_pollen')} 授粉特化：驻守 ${poll} 只采集蜂</h3><div class="poll-row">${button('poll-step', '−', { id: field.fieldId, value: poll - 1, disabled: poll <= 0 })}${this.range('pollinators', field.fieldId, poll, 0, maxPoll, 1, '驻守采集蜂')}${button('poll-step', '+', { id: field.fieldId, value: poll + 1, disabled: poll >= maxPoll })}</div>${this.pollProgress(field)}<p class="muted">驻守的采集蜂不运蜜，但会提高花田恢复速度并让它成长为更高级的花田（会吸引更强敌害）。最多派出能干活的采集蜂的一半。</p>` : ''}`);
   }
 
   private renderEcoPanel(): string {
@@ -1685,10 +1807,10 @@ export class GameUI {
       const dv = e.threats.defenseView();
       const lost = e.run.stats.beesLost ?? 0;
       const lethalLine = dv.lethal
-        ? `<p class="${dv.mitig > 0.6 ? 'warning' : 'muted'}">敌害强度 ×${num1(dv.power)}（每个四季轮回 +${Math.round(POWER_PER_CYCLE * 100)}%）· 守卫全力出动时伤亡降到 ${pct(dv.mitig)}${lost > 0 ? ` · 本蜂群累计牺牲 ${lost} 只` : ''}</p><p class="muted">新手结束后，敌害会咬死蜜蜂：胡蜂、蛛网咬采集蜂，蜡螟毁幼虫，熊先打守卫。守卫蜂越多、攻击效率越高，伤亡越少。</p>`
+        ? `<p class="muted">亲手拍一下 = 一只守卫蜂的攻击：${num1(e.threats.swatDamage())} 伤害（升级守卫巢房的攻击效率、巡逻范围会一起变强）</p><p class="${dv.mitig > 0.6 ? 'warning' : 'muted'}">敌害强度 ×${num1(dv.power)}（每个四季轮回 +${Math.round(POWER_PER_CYCLE * 100)}%）· 守卫全力出动时伤亡降到 ${pct(dv.mitig)}${lost > 0 ? ` · 本蜂群累计牺牲 ${lost} 只` : ''}</p><p class="muted">新手结束后，敌害会咬死蜜蜂：胡蜂、蛛网咬采集蜂，蜡螟毁幼虫，熊先打守卫。守卫蜂越多、攻击效率越高，伤亡越少。</p>`
         : '<p class="muted">新手阶段敌害只会让蜜蜂受伤；新手结束后会开始咬死蜜蜂。</p>';
       const bearLine = e.threats.bearEligible()
-        ? `<p class="muted">熊：建成采集蜂巢房后不定时出没（冬天冬眠）。赶走它有蜂王浆；赶不走 ${Math.round(BEAR_DESTROY_CHANCE * 100)}% 整个蜂巢被掀翻、其余时候上缴蜂蜜。</p>` : '';
+        ? `<p class="muted">熊：建成采集蜂巢房后不定时出没（冬季将至和冬天都在冬眠）。赶走它有蜂王浆；赶不走 ${Math.round(BEAR_DESTROY_CHANCE * 100)}% 整个蜂巢被掀翻、其余时候上缴蜂蜜。</p>` : '';
       threatSection = `<h3 class="section-title">${icon('xf_status_danger')} 敌害</h3><p>${h(guardLine)}</p>${lethalLine}${bearLine}${threats.length > 1 ? `<p class="warning">同时存在 ${threats.length} 个敌害，守卫会分区，单个目标获得的攻击力下降。</p>` : ''}${injured > 0 ? `<p class="muted">${icon('xf_status_injured')} 受伤休养中的工蜂 ${injured} 只，会逐渐恢复。</p>` : ''}${(e.run.threats.streak ?? 0) > 0 ? `<p class="ok">连续击退 ${e.run.threats.streak} 次 · 再击退 ${5 - (e.run.threats.streak ?? 0) % 5} 次额外得 1 蜂王浆</p>` : ''}${threats.length === 0 ? `${artImage('state_no_threats', '没有威胁', 'empty-art')}<p class="ok">目前没有威胁</p>` : threatCards}<p class="muted">新手结束后每隔几分钟出现一只，夏季最多、冬季很少。点地图上的敌害可以亲手驱赶，奖励随蜂巢产量增长；有敌害自己溜走会中断连胜。离线期间不会生成新敌害、不会死蜂，也不会发生熊袭击。</p>`;
     }
     const starving = season.starving ? `<p class="warning">${icon('xf_status_stopped')} ${season.starveSeconds >= 150 ? '严重饥饿：蜂群正在缓慢减员' : (season.starveSeconds >= 60 ? '持续饥饿：产卵与孵化受限' : '部分蜜蜂因缺蜜暂停工作')}</p>` : '';
@@ -1774,14 +1896,26 @@ export class GameUI {
     const legacyNow = Math.round(legacyAura(points) * 100);
     const legacyNext = Math.round(legacyAura(points + preview.total) * 100);
     const queenCard = this.renderQueenRearCard();
-    const localCard = panelCard(`<div class="heading-line">${icon('xf_nav_swarm')}<h3>原地分蜂 · ${h(region.name)}</h3></div><p>只需要一只新蜂后：她带走当前蜂巢一半的资源和人口，在附近建立新蜂群（明星蜂优先跟随）。你继续经营当前蜂群，新蜂群出现在「蜂群切换」里。</p><p class="${here >= 2 ? 'ok' : 'muted'}">${h(region.name)}现在有 ${here} 个蜂群${regions.length > 0 ? ` · 远征最容易的种区需要 ${Math.min(...regions.map((item) => e.prog.zoneColoniesNeeded(item)))} 个` : ''}</p>${local.total > 0 ? `<h3 class="section-title">原地分蜂可得传承点 ${local.total}</h3>${localSources}` : '<p class="muted">原地分蜂只结算生态目标、累计产量和剩余资源的传承点；这个蜂群目前没有可领取的。</p>'}${button('confirm-local-swarm', local.ready ? '原地分蜂' : '需要一只新蜂后', { primary: true, disabled: !local.ready })}`);
+    const localCard = panelCard(`<div class="heading-line">${icon('xf_nav_swarm')}<h3>原地分蜂 · ${h(region.name)}</h3></div><p>只需要一只新蜂后：她带走当前蜂巢一半的资源和人口，在附近建立新蜂群（明星蜂优先跟随）。新蜂巢落在同一张地图上、离这里不太近的地方，领地可以和这里重叠。它会继承这座蜂巢内两圈的巢房布局、一半的属性等级和繁育比例，之后托管运转。你继续经营当前蜂巢。</p><p class="${here >= 2 ? 'ok' : 'muted'}">${h(region.name)}现在有 ${here} 个蜂群${regions.length > 0 ? ` · 远征最容易的种区需要 ${Math.min(...regions.map((item) => e.prog.zoneColoniesNeeded(item)))} 个` : ''}</p>${local.total > 0 ? `<h3 class="section-title">原地分蜂可得传承点 ${local.total}</h3>${localSources}` : '<p class="muted">原地分蜂只结算生态目标、累计产量和剩余资源的传承点；这个蜂群目前没有可领取的。</p>'}${button('confirm-local-swarm', local.ready ? '原地分蜂' : '需要一只新蜂后', { primary: true, disabled: !local.ready })}`);
     return this.panelFrame('分蜂迁徙', 'xf_nav_split', `${artImage(illustration, '分蜂迁徙', 'wide-art')}${fallWarning}<p class="ok">传承加成：现在全巢产量 +${legacyNow}%，远征分蜂后 +${legacyNext}%（每个累计传承点 +2%，永久有效）。</p><p class="muted">本巢成本倍率 ×${e.hive.constructionCostMul()}：新巢成本只看种区难度，不再逐代翻倍。</p>${queenCard}${localCard}<hr><h3 class="section-title">远征新种区（种区分蜂）</h3><p class="muted">种区像副本：出发地的蜂群数量够了才能开启（最少 2 个，难度越高越多），还要达成蜂群发展条件。</p>${conditions}<hr><h3 class="section-title">预计获得传承点 ${preview.total}</h3>${sources}<hr><div class="two-column"><div><h3>新巢重建</h3><ul class="reset-list">${preview.resets.map((item) => `<li>${h(item)}</li>`).join('')}</ul></div><div><h3>共同保留</h3><ul class="keep-list">${preview.keeps.map((item) => `<li>${h(item)}</li>`).join('')}</ul></div></div><hr><h3 class="section-title">选择新种区</h3>${regionCards}${button('confirm-swarm', this.swarmTarget.length === 0 ? '先选择一个种区' : '远征分蜂', { primary: true, disabled: !preview.ready || this.swarmTarget.length === 0 })}`);
   }
 
   private renderColoniesPanel(): string {
+    const e = this.engine();
     const choices = this.session.colonyChoices();
-    const cards = choices.map((choice) => panelCard(`<div class="card-head">${icon('xf_nav_swarm')}<div><h3>${h(choice.name)}${choice.active ? '（当前）' : ''}</h3><p>${h(choice.region)} · 成年蜂 ${choice.bees} · 蜂蜜 ${h(choice.honey)}</p><small>${choice.active ? '正在经营' : '离开期间仍按离线收益继续经营'}</small></div>${choice.active ? '' : button('switch-colony', '切换', { id: choice.id, primary: true })}</div>`)).join('');
-    return this.panelFrame('蜂群切换', 'xf_nav_swarm', `<p class="muted">分蜂后的新旧蜂群会同时保留。切换时会自动结算目标蜂群离开期间的生产。</p>${cards}`);
+    const region = e.run.regionId;
+    const runOf = (id: string) => (id === e.state.activeColonyId ? e.run : e.state.colonies.find((c) => c.id === id)?.run);
+    const card = (choice: (typeof choices)[number]): string => {
+      const run = runOf(choice.id);
+      const sameMap = run !== undefined && run.regionId === region && run.realm !== undefined;
+      const kind = run?.realm === undefined ? '' : (run.realm.daughter ? '分巢' : '原始蜂巢');
+      const status = choice.active ? '正在亲手经营' : (sameMap ? '在同一张王国地图上托管，实时运转' : '离开期间按离线收益继续经营');
+      const look = sameMap && !choice.active ? button('look-hive', '在地图上看', { id: choice.id }) : '';
+      return panelCard(`<div class="card-head">${icon(run?.realm?.daughter === true ? 'xf_nav_swarm' : 'xf_nav_hive')}<div><h3>${h(choice.name)}${choice.active ? '（当前）' : ''}</h3><p>${h(choice.region)}${kind.length > 0 ? ` · ${kind}` : ''} · 成年蜂 ${choice.bees} · 蜂蜜 ${h(choice.honey)}</p><small>${h(status)}</small></div><div class="button-pair">${look}${button('rename-colony', '改名', { id: choice.id })}${choice.active ? '' : button('switch-colony', '切换', { id: choice.id, primary: true })}</div></div>`);
+    };
+    const here = choices.filter((c) => runOf(c.id)?.regionId === region);
+    const away = choices.filter((c) => runOf(c.id)?.regionId !== region);
+    return this.panelFrame('我的王国', 'xf_nav_swarm', `<p class="muted">同一种区的蜂巢都在同一张地图上：每个蜂巢只采自己领地里的花，领地重叠处的花田两边平分。不在经营的蜂巢会托管运转（自动繁育、建造和升级）。点地图上的其它蜂巢也能切换过去。</p><h3 class="section-title">${h(e.w.region().name)} · ${here.length} 座蜂巢</h3>${here.map(card).join('')}${away.length > 0 ? `<h3 class="section-title">其它种区</h3>${away.map(card).join('')}` : ''}`);
   }
 
   private visibleTasks(): TaskDef[] {
@@ -2088,8 +2222,44 @@ export class GameUI {
     const stakes = e.state.meta.tutorialDone
       ? `<p class="warning">赶不走它的话：${Math.round(BEAR_DESTROY_CHANCE * 100)}% 会把整个蜂巢掀翻（这个蜂群从零开始），${100 - Math.round(BEAR_DESTROY_CHANCE * 100)}% 蜜蜂上缴约 ${num1(tribute)} 蜂蜜。</p>`
       : '<p class="muted">新手阶段熊只会抢走一点蜂蜜。</p>';
-    const tip = guards > 0 ? `守卫蜂 ${guards} 只会集结到巢门，你也可以直接点熊拍打（按住连拍）。` : '还没有守卫蜂：直接点熊拍打（按住连拍）就能赶走它。';
+    const swat = num1(e.threats.swatDamage());
+    const tip = guards > 0 ? `守卫蜂 ${guards} 只会集结到巢门，你也可以直接点熊拍打（按住连拍，每下 ${swat} 伤害，和一只守卫蜂一样）。熊有 ${Math.ceil(event.maxHp)} 体力。` : `还没有守卫蜂：只能靠你点熊拍打（按住连拍，每下 ${swat} 伤害）。熊有 ${Math.ceil(event.maxHp)} 体力，快去培养守卫蜂吧。`;
     return `<div class="modal-layer threat-layer"><section class="modal-card bear-card">${artImage('badge_bear', '熊来袭', 'bear-badge')}<h2>${icon('xf_enemy_bear')} 熊来袭</h2><p>熊循着蜜香靠近蜂巢，约 ${seconds} 秒后开始抢蜜。${h(tip)}</p>${stakes}<div class="choice-stack">${button('bear-choice', '迎战！去拍走它', { id: event.eventId, value: 'defend', primary: true })}${this.adButton('ad-bear-aid', '请邻巢援军赶走熊（不损失蜂蜜）', AdPlacement.BearAid, { id: event.eventId, primary: false })}${button('bear-close', '先准备一下')}</div></section></div>`;
+  }
+
+  private confirmSwitchHive(id: string): void {
+    const choice = this.session.colonyChoices().find((c) => c.id === id);
+    if (choice === undefined) return;
+    this.requestConfirm(`去「${choice.name}」`, `${choice.region} · 成年蜂 ${choice.bees} · 蜂蜜 ${choice.honey}。切换后由你亲手经营它，当前蜂巢改为托管，继续在地图上自动运转。`, '切换过去', () => {
+      if (!this.session.switchColony(id)) { this.showToast('蜂群切换失败', true); return; }
+      this.selectedCell = ''; this.selectedField = ''; this.placing = ''; this.movingCell = '';
+      this.view = 'field'; this.canvasFitted = false; this.closePanel(false);
+      this.showToast(`现在经营「${choice.name}」`);
+    }, false);
+  }
+
+  private openNaming(id: string): void {
+    const e = this.engine();
+    this.nameTarget = id;
+    this.nameSeed = Math.floor(Math.random() * 360);
+    const current = e.state.meta.colonyNames?.[id];
+    this.nameDraft = current !== undefined && current.length > 0 && !/蜂群$/.test(current) ? current : e.suggestName(this.nameSeed);
+    this.nameError = '';
+    this.session.audio.play('ui_open_panel');
+  }
+
+  /** 取名弹窗：预设名可以“换一个”，也可以自己输入（抖音弹系统键盘） */
+  private renderNameOverlay(): string {
+    const e = this.engine();
+    const id = this.nameTarget;
+    const run = id === e.state.activeColonyId ? e.run : e.state.colonies.find((c) => c.id === id)?.run;
+    const region = e.w.cfg.regions.find((r) => r.id === run?.regionId)?.name ?? '';
+    const lead = id === 'colony-0' ? `这是你在${region}的第一座蜂巢，也是王国的起点。` : `新蜂后在${region}建立了一座新蜂巢。`;
+    const keyboard = platform().textInput !== undefined;
+    const field = keyboard
+      ? `<button type="button" class="name-display" data-action="name-edit">${h(this.nameDraft)}<small>点这里输入</small></button>`
+      : `<input class="name-input" type="text" maxlength="${HIVE_NAME_MAX}" value="${h(this.nameDraft)}" aria-label="蜂巢名字">`;
+    return `<div class="modal-layer"><section class="modal-card name-card">${icon('xf_nav_hive')}<h2>给蜂巢起个名字</h2><p>${h(lead)}它会在地图上标出名字，之后也可以在侧边栏「王国」里改名。</p><div class="name-field">${field}${button('name-reroll', '换一个')}</div>${this.nameError.length > 0 ? `<p class="warning">${h(this.nameError)}</p>` : `<p class="muted">最多 ${HIVE_NAME_MAX} 个字</p>`}<div class="choice-row">${button('name-later', '以后再说')}${button('name-confirm', '就叫这个', { primary: true })}</div></section></div>`;
   }
 
   private renderBoostOverlay(): string {
@@ -2127,6 +2297,7 @@ export class GameUI {
     if (this.boostModal) return this.renderBoostOverlay();
     const bear = this.engine().threats.pendingBear();
     if (this.bearModal && bear !== null && bear.phase === 'warning') return this.renderBearOverlay(bear);
+    if (this.nameTarget.length > 0) return this.renderNameOverlay();
     if (this.eventModal) {
       const html = this.renderEventOverlay();
       if (html.length > 0) return html;
@@ -2201,7 +2372,7 @@ export class GameUI {
       case 'daily-bonus': this.feedback(e.dailyBonus()); this.session.saveNow(); break;
       case 'goto-bloom': this.goTo(`fieldId:${id}`, 'field'); return;
       case 'close-tip': this.sceneTip = null; break;
-      case 'drawer-toggle': if (this.drawerOpen) this.closePanel(); else this.openPanel(this.panel || 'hub'); return;
+      case 'drawer-toggle': if (this.drawerOpen) this.closePanel(); else this.openPanel(this.panel || this.defaultPanel()); return;
       case 'close-panel':
         if (target.id === 'drawer-scrim' && Date.now() < this.suppressScrimUntil) return;
         this.closePanel(); return;
@@ -2230,6 +2401,41 @@ export class GameUI {
         }, false);
         return;
       }
+      case 'open-field': {
+        this.selectedField = id;
+        this.openPanel('field', true, !inPanel);
+        return;
+      }
+      case 'name-reroll': {
+        this.nameSeed += 1;
+        this.nameDraft = e.suggestName(this.nameSeed);
+        this.nameError = '';
+        const input = this.root.querySelector<HTMLInputElement>('.name-input');
+        if (input !== null) input.value = this.nameDraft;
+        break;
+      }
+      case 'name-edit': {
+        const backend = platform().textInput;
+        if (backend !== undefined) {
+          void backend.prompt(this.nameDraft, HIVE_NAME_MAX).then((value) => {
+            if (value !== null) { this.nameDraft = value; this.nameError = ''; }
+            this.refreshGame(true);
+          });
+        }
+        return;
+      }
+      case 'name-confirm': {
+        const input = this.root.querySelector<HTMLInputElement>('.name-input');
+        const raw = input !== null ? input.value : this.nameDraft;
+        const result = e.renameColony(this.nameTarget, raw);
+        if (result.ok) { this.nameTarget = ''; this.showToast(result.message); this.session.saveNow(); }
+        else { this.nameError = result.message; this.session.audio.play('ui_error'); }
+        break;
+      }
+      case 'name-later': e.skipName(this.nameTarget); this.nameTarget = ''; break;
+      case 'rename-colony': this.openNaming(id); break;
+      case 'look-hive': this.closePanel(false); this.goTo('field', 'field'); this.session.renderer?.lookAtHive(id); return;
+      case 'poll-step': this.feedback(e.setPollinators(id, Number(value))); break;
       case 'cancel-batch': this.feedback(e.cancelBatch(Number(id))); break;
       case 'open-upgrade': this.upgradeBuilding = id; this.openPanel('upgrade', true, !inPanel); return;
       case 'expand-next': this.expandNext(); break;
@@ -2487,8 +2693,10 @@ export class GameUI {
       if (output !== null && output !== undefined) output.textContent = `${value}`;
     } else if (kind === 'wax-share') {
       e.setWaxShare(value / 100); e.saveRequested = true;
-    } else if (kind === 'pollinators' && final) {
-      this.feedback(e.setPollinators(id, value));
+    } else if (kind === 'pollinators') {
+      // 拖动过程中就生效：触屏松手时界面会先刷新，只靠 change 事件会丢失（安卓、抖音驻守不了的原因）
+      const r = e.setPollinators(id, value);
+      if (final || !r.ok) this.feedback(r);
     } else if (kind === 'volume') {
       const settings = e.state.meta.settings;
       if (id === 'musicVolume') settings.musicVolume = value;
@@ -2688,7 +2896,7 @@ export class GameUI {
     const e = this.engine();
     const local = e.localPreview();
     if (!local.ready) return;
-    this.requestConfirm('原地分蜂', `新蜂后将带走当前蜂巢一半的人口和资源，在${e.w.region().name}附近建立新蜂群（明星蜂优先跟随）。你继续留在当前蜂群，可以随时在「蜂群切换」里过去。${local.total > 0 ? `本次获得 ${local.total} 传承点。` : ''}`, '确认分蜂', () => {
+    this.requestConfirm('原地分蜂', `新蜂后将带走当前蜂巢一半的人口和资源，在${e.w.region().name}同一张地图上建立新蜂巢（明星蜂优先跟随），并继承内两圈巢房布局和一半属性等级。你继续留在当前蜂巢，新蜂巢会托管运转，点地图上的它就能切换过去。${local.total > 0 ? `本次获得 ${local.total} 传承点。` : ''}`, '确认分蜂', () => {
       const points = local.total;
       const result = e.swarmLocal();
       this.feedback(result);

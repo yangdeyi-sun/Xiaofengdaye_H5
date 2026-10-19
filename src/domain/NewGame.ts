@@ -165,7 +165,7 @@ export function createInitialState(cfg: GameConfigDef, playerId: string, now: nu
     playerId: playerId, createdAt: now, totalPlayTime: 0, swarmCount: 0, regionsVisited: [cfg.regions[0].id],
     codexFlowers: [], codexThreats: [], achievements: [], skins: ['classic'], inheritance: inh, settings: settings,
     tutorialStep: 0, tutorialDone: false, history: [], totalWinters: 0, featureUnlocks: [], introsSeen: [],
-    daily: emptyDaily(), kingdom: emptyKingdom(), nameSeq: 0, starCodex: [], raidWins: 0
+    daily: emptyDaily(), kingdom: emptyKingdom(), nameSeq: 0, starCodex: [], raidWins: 0, popupsSeen: []
   };
   const gs: GameState = {
     meta: meta, run: createRun(cfg, cfg.regions[0].id, 0, seed, 0), activeColonyId: 'colony-0', colonies: [],

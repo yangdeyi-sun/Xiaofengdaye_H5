@@ -64,6 +64,15 @@ export interface ClipboardBackend {
 }
 
 /**
+ * 系统键盘输入（可选）。抖音小游戏是 Canvas 界面，没有原生输入框，需要用 tt.showKeyboard 弹出系统键盘；
+ * 网页和安卓直接用页面里的输入框，不需要实现。
+ */
+export interface TextInputBackend {
+  /** 弹出键盘，initial 为默认文字；玩家确认返回输入内容，取消返回 null */
+  prompt(initial: string, maxLength: number): Promise<string | null>;
+}
+
+/**
  * 云存档后端（可选）。需要服务端或抖音云配合（登录换取玩家身份、按玩家保存一份存档）；
  * 未配置时游戏只提供本机存档 + 存档码，不会假装已经云同步。
  */
@@ -84,6 +93,8 @@ export interface Platform {
   vibrate(ms: number): void;
   readonly clipboard?: ClipboardBackend;
   readonly cloud?: CloudSaveBackend;
+  /** 系统键盘（Canvas 界面的平台需要） */
+  readonly textInput?: TextInputBackend;
   /** 尝试固定屏幕方向；原生壳保证可用，普通浏览器受系统权限限制时返回 false。 */
   setOrientation?(orientation: 'auto' | 'landscape' | 'portrait'): Promise<boolean>;
   /** 单调时钟（毫秒） */

@@ -18,6 +18,8 @@ import { STAR_TRAITS } from '../domain/RosterService';
 import { legacyAura } from '../domain/World';
 import { Guide, INTRO_TOPICS } from '../domain/Guide';
 import { softExponent } from '../domain/World';
+import { buildArtManifest } from '../scene/ArtManifest';
+import { REALM_MIN_GAP, insideTerritory, realmView, syncRealm } from '../domain/RealmService';
 
 let pass = 0;
 let fail = 0;
@@ -297,12 +299,13 @@ queenEngine.run.colony.larvae = 1;
 let queenTries = 0;
 let queenChanceOk = true;
 while (queenEngine.run.colony.youngQueens === 0 && queenTries < 60) {
-  const expect = Math.min(1, 0.25 + 0.02 * queenTries);
+  const expect = Math.min(1, 0.25 + 0.1 * queenTries);
   if (Math.abs(queenEngine.colony.queenChance() - expect) > 1e-9) queenChanceOk = false;
   queenTries += 1;
   queenEngine.differentiateQueen();
 }
-ok(queenChanceOk, 'queen chance starts at 25% and grows 2% per failure');
+ok(queenChanceOk, 'queen chance starts at 25% and grows 10% per failure');
+ok(queenTries <= 9, 'queen is guaranteed by the 9th try', `${queenTries}`);
 ok(queenEngine.run.colony.youngQueens === 1 && queenEngine.run.colony.queenAttempts === queenTries &&
   queenEngine.run.colony.larvae === 0 && (queenEngine.run.colony.queenFails ?? 0) === 0 &&
   Math.abs(queenEngine.w.econ.num(Res.Jelly) - (500 - queenTries * 10 + (queenTries - 1) * 5)) < 1e-6,
@@ -683,8 +686,8 @@ if (legacyState !== null) {
   const honey0 = te.w.econ.num(Res.Honey);
   let taps = 0;
   let last = '';
-  while (taps < 20 && te.threats.activeList().length > 0) { te.step(0.2); last = te.swatThreat('tap1').message; taps++; }
-  ok(te.threats.activeList().length === 0 && !f.webbed && taps <= 7, 'a few taps clear a web by hand', `${taps} taps`);
+  while (taps < 80 && te.threats.activeList().length > 0) { te.step(0.2); last = te.swatThreat('tap1').message; taps++; }
+  ok(te.threats.activeList().length === 0 && !f.webbed && taps === Math.ceil(30 / te.threats.swatDamage()), 'a web needs hp / guard-attack taps by hand', `${taps} taps`);
   ok(last.startsWith('亲手击退') && te.w.econ.num(Res.Honey) > honey0, 'hand clear pays honey', last);
   ok((te.run.threats.streak ?? 0) === 1 && (te.run.threats.swats ?? 0) >= taps, 'streak and swat counters advance');
   te.threats.honeyPerSec = () => 100;
@@ -830,6 +833,10 @@ if (legacyState !== null) {
   ra.run.season.season = 'autumn';
   ra.run.season.startedAt = ra.run.time;
   ra.run.season.endsAt = ra.run.time + 400;
+  // 拍打伤害等于守卫攻击：给足攻击力，专心测保卫战流程
+  ra.run.upgrades['guard.attack'] = 25;
+  ra.run.upgrades['guard.range'] = 20;
+  ra.w.attrs.recompute();
   for (let i = 0; i < 30 && !ra.threats.raidActive(); i++) ra.step(1);
   ok(ra.threats.raidActive() && ra.run.threats.raid?.phase === 'warn', 'the hive defense raid starts in autumn after the first winter');
   for (let i = 0; i < 40 && ra.run.threats.raid?.phase === 'warn'; i++) ra.step(1);
@@ -969,8 +976,15 @@ if (legacyState !== null) {
   ok(!swat.bearChoice('b3', 'tribute').ok && swat.bearChoice('b3', 'defend').ok && swat.threats.pendingBear()?.phase === 'active',
     'bear choices: only defend (or the ad) remain');
   let taps = 0;
-  while (swat.threats.pendingBear() !== null && taps < 60) { taps++; swat.swatThreat('b3'); swat.step(0.13); }
-  ok(swat.threats.pendingBear() === null && swat.run.stats.bearsRepelled === 1 && taps <= 25, 'swatting drives the bear away', `${taps}`);
+  const hp0 = swat.threats.pendingBear()!.hp;
+  swat.swatThreat('b3');
+  taps++;
+  ok(Math.abs(hp0 - swat.threats.pendingBear()!.hp - swat.threats.guardAttack()) < 1e-9, 'a swat deals exactly one guard attack');
+  swat.step(0.13);
+  swat.run.upgrades['guard.attack'] = 10;
+  swat.w.attrs.recompute();
+  while (swat.threats.pendingBear() !== null && taps < 400) { taps++; swat.swatThreat('b3'); swat.step(0.13); }
+  ok(swat.threats.pendingBear() === null && swat.run.stats.bearsRepelled === 1 && taps > 40, 'swatting drives the bear away, guard upgrades make swats stronger', `${taps}`);
 }
 {
   // 冬季也有季节事件；保卫战第 3 轮起 4 波
@@ -989,6 +1003,82 @@ if (legacyState !== null) {
   const loss0 = we.w.attrs.get('storage.winterLoss');
   ok(we.events.choose('huddle').ok && we.w.attrs.get('storage.winterLoss') < loss0, 'huddling lowers winter upkeep');
   ok(we.threats.raidWaves(1) === 3 && we.threats.raidWaves(3) === 4, 'raids have 3 waves early and 4 later');
+}
+{
+  // 冬季将至和冬季没有熊；入冬时还在的熊回去冬眠
+  const hs = createInitialState(DEFAULT_CONFIG, 'hibernate', 0, 91);
+  hs.meta.tutorialDone = true;
+  const he = new GameEngine(DEFAULT_CONFIG, hs);
+  he.run.season.formal = true;
+  he.run.season.season = 'winterPrep';
+  he.run.season.startedAt = 0; he.run.season.endsAt = 1e9;
+  ok(!he.threats.bearSeasonOk(), 'no bear can come before or during winter');
+  he.run.threats.active.push({ eventId: 'hb', type: ThreatType.Bear, targetId: 'hive', phase: ThreatPhase.Active,
+    hp: 300, maxHp: 300, startedAt: 0, endsAt: 1e9, postponed: 0, settled: false });
+  const honeyH = he.w.econ.num(Res.Honey);
+  he.step(0.1);
+  ok(he.threats.pendingBear() === null && he.w.adults() === 0 && he.w.econ.num(Res.Honey) >= honeyH, 'a bear still around at winter leaves without a fight');
+  he.run.season.season = 'autumn'; he.run.season.endsAt = he.run.time + 100;
+  ok(!he.threats.bearSeasonOk(), 'no bear in the last minutes of autumn');
+  // 向日葵、油菜花容量
+  ok(DEFAULT_CONFIG.flowers.find((f) => f.id === 'sunflower')!.maxStock <= 100 && DEFAULT_CONFIG.flowers.find((f) => f.id === 'rapeseed')!.maxStock <= 110,
+    'sunflower and rapeseed capacity are moderate');
+}
+{
+  // 王国地图：原地分蜂的新蜂巢落在同一张地图上，领地、共用花田、托管运转、继承属性、取名
+  const ks = createInitialState(DEFAULT_CONFIG, 'realm', 0, 97);
+  ks.meta.tutorialDone = true;
+  const ke = new GameEngine(DEFAULT_CONFIG, ks);
+  const cells = ke.run.hive.cells.filter((c) => c.unlocked && c.building === '');
+  cells[0].building = Bld.ForagerRoom; cells[1].building = Bld.Brewery; cells[2].building = Bld.ScoutRoom;
+  ke.hive.reindex();
+  ke.run.upgrades['forager.carry'] = 6;
+  ke.run.colony.roles[Role.Forager] = 30; ke.run.colony.roles[Role.House] = 10;
+  ke.run.map.fields.forEach((f, i) => { if (i < 8) { f.discovered = true; f.intelExpiresAt = 1e9; } });
+  ke.run.season.formal = true; ke.run.season.season = 'summer'; ke.run.season.startedAt = 0; ke.run.season.endsAt = 300;
+  ke.run.colony.youngQueens = 1;
+  ke.run.res[Res.Honey] = BigNum.of(2000);
+  const parentFields = ke.run.map.fields.length;
+  ok(ke.swarmLocal().ok, 'local swarm with a queen');
+  const parent = ke.run;
+  const slot = ke.state.colonies[0];
+  const child = slot.run;
+  const region = DEFAULT_CONFIG.regions.find((r) => r.id === parent.regionId)!;
+  const realm = ke.state.meta.realms?.[parent.regionId];
+  ok(realm !== undefined && parent.realm !== undefined && !parent.realm.daughter && child.realm !== undefined && child.realm.daughter,
+    'both hives sit on one kingdom map, the original and the daughter are told apart');
+  const gap = Math.hypot(child.realm!.x - parent.realm!.x, child.realm!.y - parent.realm!.y);
+  ok(gap >= region.maxRadius * REALM_MIN_GAP - 1e-6 && gap < parent.realm!.r + child.realm!.r, 'the new hive keeps a minimum distance but territories overlap', `${Math.round(gap)}`);
+  ok(realm!.fields.length > parentFields && child.map.fields.filter((f) => f.home).length === 2, 'the daughter gets its own fields around it');
+  ok(child.map.fields.filter((f) => !f.home).every((f) => insideTerritory(child.realm!, f.x + child.realm!.x, f.y + child.realm!.y)),
+    'a hive only holds fields inside its own territory');
+  const shared = child.map.fields.filter((f) => parent.map.fields.some((p) => p.fieldId === f.fieldId));
+  ok(shared.length > 0 && shared.every((f) => f.share === 0.5), 'overlapping fields are shared and their regrowth is split', `${shared.length}`);
+  ok(child.upgrades['forager.carry'] === 3 && child.colony.plan.on && child.season.formal && child.season.season === 'summer' &&
+    child.hive.cells.some((c) => c.building === Bld.ForagerRoom), 'the daughter inherits layout, half the upgrades, the breeding plan and the season');
+  ok((ke.state.meta.namePending ?? []).includes(slot.id), 'every new hive asks for a name');
+  ok(ke.renameColony(slot.id, '  花溪蜜庄  ').ok && ke.state.meta.colonyNames?.[slot.id] === '花溪蜜庄' && !(ke.state.meta.namePending ?? []).includes(slot.id),
+    'naming a hive stores the name');
+  ok(!ke.renameColony(slot.id, '   ').ok, 'empty names are rejected');
+  // 托管运转 + 同步：共用花田两边存量一致
+  const bg = GameEngine.background(DEFAULT_CONFIG, ke.state, slot.id, child);
+  const t0 = child.time;
+  for (let i = 0; i < 300; i++) { ke.step(0.1); bg.step(0.1); syncRealm(ke.state, parent.regionId); }
+  ok(child.time > t0 + 29 && bg.w.background && shared.every((f) => Math.abs(f.stock - parent.map.fields.find((p) => p.fieldId === f.fieldId)!.stock) < 1e-6),
+    'the background hive runs in real time and shared fields stay in sync');
+  ok(realmView(ke.state, DEFAULT_CONFIG)!.hives.length === 2, 'the map view shows both hives');
+  // 被熊毁巢重开：保留位置和领地
+  const pos = { ...parent.realm! };
+  ke.threats.hiveLost = 'bear';
+  ke.step(0.1);
+  ok(ke.run !== parent && ke.run.realm !== undefined && ke.run.realm.x === pos.x && ke.run.map.fields.length > 2,
+    'a wrecked hive restarts at the same spot on the kingdom map');
+}
+{
+  // 每款皮肤（经典除外）都有自己的建筑图集
+  const art = buildArtManifest();
+  const missing = DEFAULT_CONFIG.skins.filter((skin) => skin.id !== 'classic' && !art.has(`atlas_skin_${skin.id}`)).map((skin) => skin.id);
+  ok(missing.length === 0, `every hive skin has building art (missing: ${missing.join(',')})`);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

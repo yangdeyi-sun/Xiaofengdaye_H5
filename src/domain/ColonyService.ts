@@ -47,7 +47,7 @@ export class ColonyService {
     return [new CostAmount(Res.Jelly, BigNum.of(this.w.cfg.swarm.queenJelly))];
   }
 
-  /** 新蜂后分化成功率：基础 25%，每连续失败一次 +2%（封顶 100%） */
+  /** 新蜂后分化成功率：基础 25%，每连续失败一次 +10%（封顶 100%） */
   queenChance(): number {
     const sc = this.w.cfg.swarm;
     const fails = Math.max(0, Math.floor(this.w.s.run.colony.queenFails ?? 0));
@@ -70,7 +70,7 @@ export class ColonyService {
 
   /**
    * 选一只幼虫分化为新蜂后：消耗 1 只幼虫 + 10 蜂王浆。
-   * 成功率 25% 起，每连续失败一次 +2%；失败返还一半蜂王浆，那只幼虫没长成蜂后，仍留作普通幼虫。
+   * 成功率 25% 起，每连续失败一次 +10%；失败返还一半蜂王浆，那只幼虫没长成蜂后，仍留作普通幼虫。
    */
   differentiateQueen(): CmdResult {
     const colony = this.w.s.run.colony;
@@ -257,7 +257,7 @@ export class ColonyService {
   // ---------------- 繁育计划 ----------------
   /** 中期解锁：度过第一个冬天，或成年蜂达到 20 只 */
   planUnlocked(): boolean {
-    return this.w.unlocked('t_survive_winter') || this.w.adults() >= PLAN_UNLOCK_ADULTS;
+    return this.w.background || this.w.unlocked('t_survive_winter') || this.w.adults() >= PLAN_UNLOCK_ADULTS;
   }
 
   planUnlockText(): string {

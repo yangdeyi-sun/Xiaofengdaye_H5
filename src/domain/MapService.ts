@@ -480,7 +480,9 @@ export class MapService {
     const season = this.w.seasonDef().nectarMul;
     const poll = this.w.s.run.colony.pollinators[f.fieldId];
     const pollBonus = 1 + Math.min(0.8, 0.08 * (poll === undefined ? 0 : poll));
-    return fd.regen * this.w.attrs.get('scout.regrowth') * region.regenMul * season * pollBonus * (1 + 0.15 * (f.level - fd.tier));
+    // 王国地图：几个蜂巢领地重叠的花田，恢复量平分（share = 1/n）
+    const share = f.share === undefined ? 1 : f.share;
+    return fd.regen * this.w.attrs.get('scout.regrowth') * region.regenMul * season * pollBonus * (1 + 0.15 * (f.level - fd.tier)) * share;
   }
 
   private foragingTick(dt: number): void {

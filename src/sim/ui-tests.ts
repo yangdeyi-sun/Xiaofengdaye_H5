@@ -154,5 +154,29 @@ const originalBuilding = original.building, balance = e.w.econ.num('honey');
 click('start-move-cell', original.cellId); settle();
 ui.touchStart(160, 500, 7); ui.touchEnd(160, 500, 7);
 check(original.building === '' && destination.building === originalBuilding && e.w.econ.num('honey') === balance, 'mini game executes the same free building move as H5');
+// 第七批：侧边栏按页面分组、花田一览、自动弹窗只弹一次、蜂巢取名、王国面板
+const ctl7 = controller as unknown as { view: string; allowAuto(topic: string): boolean; openNaming(id: string): void; nameDraft: string; nameTarget: string; closePanel(sound: boolean): void };
+const navOrder = (): string[] => ui.document.root.querySelectorAll<UiElement>('.nav-group').map((n) => n.textContent ?? '');
+ctl7.view = 'field'; controller.openPanel('fields'); settle();
+check(navOrder()[0] === '花田' && ui.document.root.querySelector('.game-drawer.view-field') !== null, 'field view puts the field group first with the field drawer theme');
+check(ui.document.root.querySelectorAll('.field-row').length > 0 && ui.document.root.querySelectorAll<UiElement>('[data-action]').some((n) => n.dataset.action === 'open-field'),
+  'field overview lists discovered fields with a jump button');
+ctl7.view = 'hive'; controller.openPanel('hub'); settle();
+check(navOrder()[0] === '蜂巢' && ui.document.root.querySelector('.game-drawer.view-hive') !== null, 'hive view puts the hive group first with the hive drawer theme');
+e.state.meta.tutorialDone = true; e.state.meta.totalWinters = 1; e.run.season.formal = true;
+check(ctl7.allowAuto('ui-test:once') && !ctl7.allowAuto('ui-test:once'), 'automatic popups show only the first time after the novice season');
+e.state.meta.totalWinters = 0; e.state.meta.swarmCount = 0; e.run.season.formal = false;
+check(ctl7.allowAuto('ui-test:once'), 'the novice season keeps repeating guidance popups');
+e.state.meta.namePending = ['colony-0'];
+ctl7.openNaming('colony-0'); controller.refreshGame(true); settle();
+check(ui.document.root.querySelector('.name-card') !== null && ui.document.root.querySelector('.name-input') !== null, 'naming dialog shows a text box with a preset name');
+const firstDraft = ctl7.nameDraft; click('name-reroll'); settle();
+check(ctl7.nameDraft !== firstDraft && ctl7.nameDraft.length > 0, 'reroll offers a different preset name');
+const nameInput = ui.document.root.querySelector<UiElement>('.name-input') as unknown as { value: string };
+nameInput.value = '小蜂王府'; click('name-confirm'); settle();
+check(e.state.meta.colonyNames?.['colony-0'] === '小蜂王府' && (e.state.meta.namePending ?? []).length === 0 && ctl7.nameTarget === '', 'typed hive name is saved and the prompt clears');
+controller.openPanel('colonies'); settle();
+check(JSON.stringify(ui.document.root.textContent ?? '').includes('小蜂王府') && ui.document.root.querySelectorAll<UiElement>('[data-action]').some((n) => n.dataset.action === 'rename-colony'),
+  'kingdom panel shows the hive name with a rename button');
 ui.destroy(); session.audio.release();
 console.log(`${passed} complete UI host checks passed`);

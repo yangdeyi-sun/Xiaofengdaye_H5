@@ -190,6 +190,8 @@ export class KingdomService {
         k.honeyMark = mark;
       }
     }
+    // 托管的蜂巢也为王国积累经验，但升级奖励只发给正在经营的蜂巢
+    if (this.w.background) return;
     let guard = 0;
     while (k.xp >= this.need(k.level) && guard < 50) {
       guard++;
@@ -207,7 +209,7 @@ export class KingdomService {
     k.starEggs += r.starEgg;
     const meta = this.w.s.meta;
     if (r.skin.length > 0 && meta.skins.indexOf(r.skin) < 0) meta.skins.push(r.skin);
-    this.w.msg('milestone', `王国升到 Lv${level}！获得 ${this.rewardText(r)}`);
+    this.w.msg('milestone', `王国升到 Lv${level}！获得 ${this.rewardText(r)}`, 'kingdom');
     this.w.emit('task', 0, 0, `王国 Lv${level}`, 'any');
   }
 
@@ -286,7 +288,7 @@ export class KingdomService {
       cur.reward.forEach((r: RewardDef) => this.w.econ.add(r.res, BigNum.of(r.amount), Reason.Task, cur.id));
       this.w.gainXp(15);
       const reward = cur.reward.map((r: RewardDef) => `${r.amount} ${r.res === Res.Jelly ? '蜂王浆' : '蜂蜜'}`).join('、');
-      this.w.msg('task', `篇章「${v.title}」${v.index + 1}/${v.total} 完成：${cur.name}，获得 ${reward}`);
+      this.w.msg('task', `篇章「${v.title}」${v.index + 1}/${v.total} 完成：${cur.name}，获得 ${reward}`, 'chapter');
       this.w.emit('task', 0, 0, cur.name, 'any');
       out.push(cur.id);
     }

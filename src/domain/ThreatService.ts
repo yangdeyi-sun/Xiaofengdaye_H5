@@ -15,6 +15,8 @@ export const BEAR_TRIBUTE_RATIO = 0.2;
 
 /** 敌害强度每个四季轮回增加的比例 */
 export const POWER_PER_CYCLE = 0.3;
+/** 敌害血量每个四季轮回额外增加的比例 */
+export const HP_GROWTH_PER_CYCLE = 0.12;
 /** 新手结束后敌害每秒咬死蜜蜂的基础速度（乘以敌害强度与守卫减伤） */
 const KILL_RATE: Record<string, number> = { wasp: 0.02, web: 0.012, moth: 0.015, bear: 0.08 };
 /** 敌害咬死的工种顺序：前面的没有了才轮到后面的 */
@@ -175,7 +177,9 @@ export class ThreatService {
     const th = this.w.s.run.threats;
     const d = this.def(type);
     const cycle = softExponent(this.w.s.run.season.cycleIndex, 6, 0.68);
-    const hp = (d.hp + d.hpPerCycle * cycle) * (1 + this.w.region().difficulty * 0.15);
+    // 敌害每个四季轮回都更结实：基础成长之外再乘 (1 + 12% × 轮回数)
+    const rounds = Math.max(0, this.w.s.run.season.cycleIndex);
+    const hp = (d.hp + d.hpPerCycle * cycle) * (1 + this.w.region().difficulty * 0.15) * (1 + HP_GROWTH_PER_CYCLE * rounds);
     const t = this.w.s.run.time;
     const isBear = type === ThreatType.Bear;
     const warn = isBear ? 60 * this.w.attrs.get('guard.warning') : 0;
@@ -194,7 +198,7 @@ export class ThreatService {
     }
     if (!quiet) this.w.msg('threat', isBear ? (this.w.s.meta.tutorialDone
       ? '警报：一头熊正在接近蜂巢！赶不走它的话，可能整个蜂巢都会被掀翻'
-      : '警报：一头熊正在接近蜂巢！点它拍打可以赶走它') : this.spawnText(type, targetId));
+      : '警报：一头熊正在接近蜂巢！点它拍打可以赶走它') : this.spawnText(type, targetId), `threat:${type}`);
     if (type === ThreatType.Web) {
       const f = this.w.field(targetId);
       if (f !== null) {
@@ -316,13 +320,33 @@ export class ThreatService {
       if (t >= th.nextBearAt && this.w.interactive) {
         th.nextBearAt = t + this.w.rng.range(BEAR_CHECK_MIN, BEAR_CHECK_MAX);
         const bearOpen = th.active.some((e: ThreatEvent) => e.type === ThreatType.Bear && !e.settled);
-        if (!bearOpen && !this.raidActive() && !this.w.isWinter() && this.w.rng.chance(BEAR_CHANCE)) {
+        if (!bearOpen && !this.raidActive() && this.bearSeasonOk() && this.w.rng.chance(BEAR_CHANCE)) {
           this.spawn(ThreatType.Bear, 'hive');
           const st = this.w.s.run.stats;
           st.bearsCome = (st.bearsCome ?? 0) + 1;
         }
       }
     }
+  }
+
+  /** 熊冬眠：冬季将至和冬季都不会来；秋末剩不到 3 分钟也不来，免得拖进冬天 */
+  bearSeasonOk(): boolean {
+    const s = this.w.s.run.season;
+    if (s.season === 'winter' || s.season === 'winterPrep') return false;
+    if (s.formal && s.season === 'autumn' && s.endsAt - this.w.s.run.time < 180) return false;
+    return true;
+  }
+
+  /** 入冬时还在场（预警、推迟、交战）的熊直接回去冬眠，不结算奖惩 */
+  private bearHibernate(): void {
+    const s = this.w.s.run.season.season;
+    if (s !== 'winter' && s !== 'winterPrep') return;
+    this.w.s.run.threats.active.forEach((e: ThreatEvent) => {
+      if (e.type !== ThreatType.Bear || e.settled) return;
+      e.settled = true;
+      e.phase = ThreatPhase.Expired;
+      this.w.msg('info', '天冷了，熊回山里冬眠去了');
+    });
   }
 
   /** 熊开始出没：本蜂巢建成了第一个采集蜂巢房 */
@@ -495,6 +519,7 @@ export class ThreatService {
   }
 
   tick(dt: number): void {
+    this.bearHibernate();
     this.raidTick();
     this.spawnTick();
     this.allocateGuards();
@@ -625,7 +650,12 @@ export class ThreatService {
     return out;
   }
 
-  /** 玩家亲手拍打敌害：每次造成约 1/6 血量，补刀击退可多拿奖励 */
+  /** 亲手拍一下的伤害：和蜂巢里一只守卫蜂攻击一次一样（攻击效率 × 巡逻范围），升级守卫也会让拍打变强 */
+  swatDamage(): number {
+    return Math.max(0.5, this.guardAttack());
+  }
+
+  /** 玩家亲手拍打敌害：伤害等于一只守卫蜂的攻击，补刀击退可多拿奖励 */
   swat(eventId: string): CmdResult {
     const e = this.w.s.run.threats.active.find((x: ThreatEvent) => x.eventId === eventId);
     if (e === undefined || e.settled || e.phase !== ThreatPhase.Active) {
@@ -637,11 +667,7 @@ export class ThreatService {
       return CmdResult.fail('THREAT_COOLDOWN', '');
     }
     this.lastSwatAt[eventId] = t;
-    const isBear = e.type === ThreatType.Bear;
-    // 熊：每下约等于第一轮熊血量的 5%，之后的轮回熊越来越壮，靠亲手拍打会越来越吃力，需要守卫蜂帮忙
-    const baseBear = this.def(ThreatType.Bear).hp * (1 + this.w.region().difficulty * 0.15);
-    const dmg = isBear ? Math.max(1, Math.max(e.maxHp * 0.02, baseBear * 0.05))
-      : Math.max(1, e.maxHp * (e.boss === true ? 0.04 : 0.17));
+    const dmg = this.swatDamage();
     e.hp -= dmg;
     const th = this.w.s.run.threats;
     th.swats = (th.swats ?? 0) + 1;
@@ -650,7 +676,7 @@ export class ThreatService {
       delete this.lastSwatAt[eventId];
       return CmdResult.ok(`亲手击退！${gain}`);
     }
-    return CmdResult.ok(`-${Math.ceil(dmg)}`);
+    return CmdResult.ok(`-${dmg >= 10 ? Math.round(dmg) : Math.round(dmg * 10) / 10}`);
   }
 
   private settle(e: ThreatEvent, won: boolean, byPlayer: boolean = false): string {

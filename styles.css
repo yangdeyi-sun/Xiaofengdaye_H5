@@ -551,3 +551,33 @@ small { color: var(--sub); }
   .kingdom-chip small { display: none; }
   .bee-stats { gap: 3px 6px; }
 }
+.poll-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 8px; }
+.poll-row .btn { min-width: 0; padding-inline: 0; }
+/* 侧边栏：花田页（草绿、叶片色）与蜂巢页（蜂蜡、蜜色）两套外观 */
+.nav-group { margin: 8px 2px 2px; padding: 3px 0; border-radius: 9px; text-align: center; font-size: .66rem; font-weight: 800; letter-spacing: .12em; }
+.nav-group-field { color: #2f6a1d; background: #d6efbf; }
+.nav-group-hive { color: #8a4b00; background: #ffd98a; }
+.nav-group-general { color: #6b5a44; background: #efe3cc; }
+.game-drawer.view-hive .drawer-nav { background: repeating-linear-gradient(135deg, #fff1d0 0, #fff1d0 14px, #ffe9b8 14px, #ffe9b8 16px); border-right-color: #e0b866; }
+.game-drawer.view-hive .drawer-header { background: #fff3d6; border-bottom-color: #ecc47a; }
+.game-drawer.view-hive .panel-frame > header { background: linear-gradient(90deg, #ffe7a8, #fff8e7); border-bottom-color: #ecc47a; }
+.game-drawer.view-field { background: #f5fbef; }
+.game-drawer.view-field .drawer-nav { background: repeating-linear-gradient(45deg, #e8f5da 0, #e8f5da 14px, #ddefc9 14px, #ddefc9 16px); border-right-color: #a8cf8a; }
+.game-drawer.view-field .drawer-header { background: #eef8e4; border-bottom-color: #b9dba0; }
+.game-drawer.view-field .drawer-view { background: #e3f3d3; border-color: #9cc77d; }
+.game-drawer.view-field .panel-frame > header { background: linear-gradient(90deg, #cfeab6, #f4fbec); border-bottom-color: #b9dba0; }
+.game-drawer.view-field .nav-item { color: #3d5a2a; }
+.game-drawer.view-field .nav-item.active { color: #24480f; background: #a7d97f; }
+.game-drawer .nav-item.nav-field { box-shadow: inset 3px 0 0 #7fbf55; }
+.game-drawer .nav-item.nav-hive { box-shadow: inset 3px 0 0 #e8a317; }
+.drawer-handle.view-field { background: #d4efb8; border-color: #5e8c31; }
+.drawer-open .drawer-handle.view-field { background: #a7d97f; }
+.field-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px dashed #cfe5b8; }
+.field-row > span { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; column-gap: 8px; row-gap: 3px; }
+.field-row > span > .ui-icon { grid-row: span 3; width: 28px; height: 28px; }
+.name-card { text-align: center; }
+.name-card > .ui-icon { width: 54px; height: 54px; margin: 0 auto; }
+.name-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 12px 0 4px; }
+.name-input, .name-display { min-height: 46px; padding: 8px 12px; border: 2px solid var(--accent-dark); border-radius: 14px; background: #fffaf0; color: var(--text); font: inherit; font-size: 1.15rem; font-weight: 800; text-align: center; }
+.name-display { display: grid; gap: 2px; cursor: pointer; }
+.name-display small { color: var(--sub); font-size: .68rem; font-weight: 400; }

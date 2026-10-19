@@ -609,6 +609,7 @@ export class ProgressionService {
     if (this.w.count(Bld.ScoutRoom) > 0 && this.w.role(Role.Scout) > 0) {
       meta.tutorialStep = steps.length;
       meta.tutorialDone = true;
+      this.w.requestName(this.w.s.activeColonyId);
       this.w.msg('info', '新手引导完成：蜂后把整座蜂巢托付给了你。');
     }
   }

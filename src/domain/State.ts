@@ -56,7 +56,7 @@ export interface ColonyState {
   plan: BreedPlan;
   /** 有名字的蜜蜂名册：与各工种数量保持一致（缺省兼容旧存档，首次运行时补齐） */
   roster?: NamedBee[];
-  /** 新蜂后分化连续失败次数（每失败一次成功率 +2%） */
+  /** 新蜂后分化连续失败次数（每失败一次成功率 +10%） */
   queenFails?: number;
   /** 幸运孵化：接下来还有几只幼虫享受更高的明星蜂概率 */
   luckyHatch?: number;
@@ -118,6 +118,43 @@ export interface FlowerField {
   home: boolean;
   hidden: boolean;
   webbed: boolean;
+  /** 王国地图：这片花田被几个蜂巢的领地覆盖，恢复量按 1/n 分给每个蜂巢（重叠区产量平分） */
+  share?: number;
+  /** 王国地图同步用：上次同步时的存量与成长值 */
+  syncStock?: number;
+  syncGrowth?: number;
+}
+
+/** 王国地图上的一片花田（世界坐标，同一种区的蜂巢共用） */
+export interface RealmField {
+  id: string;
+  x: number;
+  y: number;
+  flower: string;
+  level: number;
+  stock: number;
+  growth: number;
+  hidden: boolean;
+  /** 哪个蜂巢的巢旁花丛（空字符串表示普通花田） */
+  homeOf: string;
+}
+
+/** 一个种区的王国地图：所有蜂巢共用的花田 */
+export interface RealmMap {
+  fields: RealmField[];
+  nextId: number;
+}
+
+/** 蜂巢在王国地图上的位置与领地 */
+export interface RunRealm {
+  /** 世界坐标 */
+  x: number;
+  y: number;
+  /** 分出去的蜂巢（false 为这个种区的原始蜂巢） */
+  daughter: boolean;
+  /** 领地基础半径与形状种子（领地是不规则的色块） */
+  r: number;
+  seed: number;
 }
 
 /** 侦察蜂逻辑实体（BEE-003） */
@@ -218,6 +255,8 @@ export interface GameMessage {
   time: number;
   kind: string;
   text: string;
+  /** 提示类别：同一类别的自动弹窗只在第一次出现时弹（缺省时界面按文字推断） */
+  topic?: string;
 }
 
 export interface LedgerEntry {
@@ -319,6 +358,8 @@ export interface RunState {
   tasksClaimed: string[];
   colonyTaskCycle: number;
   stats: RunStats;
+  /** 王国地图上的位置与领地（同一种区有多个蜂巢时才有） */
+  realm?: RunRealm;
 }
 
 export interface TalentPreset {
@@ -410,6 +451,12 @@ export interface MetaState {
   colonyNames?: Record<string, string>;
   /** 被熊毁掉的蜂巢次数 */
   hivesLost?: number;
+  /** 各种区的王国地图（同一张图上有多个蜂巢时创建） */
+  realms?: Record<string, RealmMap>;
+  /** 等待玩家取名的蜂群编号（新手交接时的第一个蜂巢、每次分蜂出来的新蜂巢） */
+  namePending?: string[];
+  /** 已经自动弹过的提示类别（之后同类只进消息记录，不再弹出） */
+  popupsSeen?: string[];
 }
 
 export interface KingdomState {

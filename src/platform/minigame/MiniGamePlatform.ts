@@ -1,5 +1,5 @@
 import type {
-  AdBackend, AudioBackend, ClipboardBackend, CloudSaveBackend, DrawableImage, ImageLoader, KeyValueStore, Platform,
+  AdBackend, AudioBackend, ClipboardBackend, CloudSaveBackend, DrawableImage, ImageLoader, KeyValueStore, Platform, TextInputBackend,
   RewardedResult, SoundHandle
 } from '../Platform';
 import type { AdUnitConfig } from './adUnits';
@@ -200,6 +200,33 @@ class MiniClipboard implements ClipboardBackend {
   }
 }
 
+/** tt.showKeyboard：确认（onKeyboardConfirm）返回文字，收起键盘不确认（onKeyboardComplete 先到）视为取消 */
+class MiniKeyboard implements TextInputBackend {
+  constructor(private readonly api: MiniGameApi) {}
+
+  prompt(initial: string, maxLength: number): Promise<string | null> {
+    const api = this.api;
+    return new Promise((resolve) => {
+      if (typeof api.showKeyboard !== 'function' || typeof api.onKeyboardConfirm !== 'function') { resolve(null); return; }
+      let done = false;
+      const finish = (value: string | null): void => {
+        if (done) return;
+        done = true;
+        try { api.offKeyboardConfirm?.(onConfirm); api.offKeyboardComplete?.(onComplete); } catch { /* ignore */ }
+        try { api.hideKeyboard?.(); } catch { /* ignore */ }
+        resolve(value);
+      };
+      const onConfirm = (res: { value: string }): void => finish(String(res?.value ?? ''));
+      const onComplete = (res: { value: string }): void => finish(res === undefined ? null : String(res.value ?? ''));
+      try {
+        api.onKeyboardConfirm(onConfirm);
+        api.onKeyboardComplete?.(onComplete);
+        api.showKeyboard({ defaultValue: initial, maxLength, multiple: false, confirmHold: false, confirmType: 'done', fail: () => finish(null) });
+      } catch { finish(null); }
+    });
+  }
+}
+
 export class MiniGamePlatform implements Platform {
   readonly name: string;
   readonly storage: KeyValueStore;
@@ -207,6 +234,7 @@ export class MiniGamePlatform implements Platform {
   readonly images: ImageLoader;
   readonly ads: AdBackend;
   readonly clipboard: ClipboardBackend;
+  readonly textInput: TextInputBackend;
   /** 云存档：接入抖音云或自建服务后在入口处传入；未传入时不显示云存档 */
   readonly cloud?: CloudSaveBackend;
   private readonly api: MiniGameApi;
@@ -220,6 +248,7 @@ export class MiniGamePlatform implements Platform {
     this.images = new MiniImages(options.api, base, options.imageExtension);
     this.ads = new MiniAds(options.api, options.adUnits);
     this.clipboard = new MiniClipboard(options.api);
+    this.textInput = new MiniKeyboard(options.api);
     this.cloud = options.cloud;
   }
 

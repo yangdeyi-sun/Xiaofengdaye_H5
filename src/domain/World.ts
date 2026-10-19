@@ -523,6 +523,8 @@ export class World {
   econ: EconomyService;
   /** 离线聚合结算模式（SAVE-006）：不触发重大事件 */
   offline: boolean = false;
+  /** 托管运转：同一张王国地图上、不在经营的蜂巢（不发每日进度、不发王国升级奖励、不弹提示） */
+  background: boolean = false;
   /** 孵化完成的回调（蜜蜂名册登记新成员），由 GameEngine 注入 */
   onHatch: (role: string, count: number, star: boolean) => void = () => {};
   /** 具体某只蜜蜂的工作记录（侦察出航、发现花田、守卫击退），由 GameEngine 注入 */
@@ -540,6 +542,13 @@ export class World {
   /** 明星蜂加成，由 GameEngine 注入 */
   starBonus: (stat: string) => { pct: number; add: number } = () => ({ pct: 0, add: 0 });
 
+  /** 请玩家给某个蜂群取名（新手交接时的第一个蜂巢、每次分蜂出来的新蜂巢） */
+  requestName(id: string): void {
+    const meta = this.s.meta;
+    if (!Array.isArray(meta.namePending)) meta.namePending = [];
+    if (meta.namePending.indexOf(id) < 0) meta.namePending.push(id);
+  }
+
   /** 王国经验 */
   gainXp(n: number): void {
     if (n <= 0 || !Number.isFinite(n)) return;
@@ -550,6 +559,7 @@ export class World {
 
   /** 每日目标进度：各系统在事件发生时调用；同时折算王国经验 */
   dailyBump(kind: string, n: number): void {
+    if (this.background) return;
     const xp = XP_BY_KIND[kind];
     if (xp !== undefined && n > 0) this.gainXp(xp * n);
     const d = this.s.meta.daily;
@@ -739,9 +749,10 @@ export class World {
     return this.ruleFlags.has(flag);
   }
 
-  msg(kind: string, text: string): void {
+  msg(kind: string, text: string, topic: string = ''): void {
     const s = this.s;
     const m: GameMessage = { id: s.nextMessageId, time: Math.round(s.run.time), kind: kind, text: text };
+    if (topic.length > 0) m.topic = topic;
     s.messages.push(m);
     s.nextMessageId += 1;
     if (s.messages.length > 60) {

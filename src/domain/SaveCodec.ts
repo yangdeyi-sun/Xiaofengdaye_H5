@@ -4,7 +4,7 @@ import { ALL_RES, ALL_ROLES } from './Types';
 import { defaultBreedPlan, emptyKingdom } from './NewGame';
 import { emptyDaily } from './DailyService';
 import {
-  ColonySlot, ColonyState, FlowerField, GameMessage, GameState, HiveState, LedgerEntry, MapState, MetaState, RunState, RunStats, SeasonState,
+  ColonySlot, ColonyState, FlowerField, GameMessage, GameState, HiveState, LedgerEntry, MapState, MetaState, RunRealm, RunState, RunStats, SeasonState,
   ThreatState
 } from './State';
 
@@ -40,6 +40,7 @@ export interface RunDTO {
   tasksClaimed: string[];
   colonyTaskCycle: number;
   stats: RunStats;
+  realm?: RunRealm;
 }
 
 export interface SaveDTO {
@@ -83,7 +84,7 @@ function runToDTO(run: RunState): RunDTO {
     res: bigOut(run.res), overflow: bigOut(run.overflow), produced: bigOut(run.produced), hive: run.hive,
     upgrades: run.upgrades, research: run.research, colony: run.colony, map: run.map, season: run.season,
     threats: run.threats, tasksDone: run.tasksDone, tasksClaimed: run.tasksClaimed,
-    colonyTaskCycle: run.colonyTaskCycle, stats: run.stats
+    colonyTaskCycle: run.colonyTaskCycle, stats: run.stats, ...(run.realm !== undefined ? { realm: run.realm } : {})
   };
 }
 
@@ -92,7 +93,8 @@ function runFromDTO(r: RunDTO): RunState {
     regionId: r.regionId, regionIndex: r.regionIndex, seed: r.seed, rngState: r.rngState, time: r.time,
     res: bigIn(r.res), overflow: bigIn(r.overflow), produced: bigIn(r.produced), hive: r.hive, upgrades: r.upgrades,
     research: r.research, colony: r.colony, map: r.map, season: r.season, threats: r.threats,
-    tasksDone: r.tasksDone, tasksClaimed: r.tasksClaimed, colonyTaskCycle: r.colonyTaskCycle, stats: r.stats
+    tasksDone: r.tasksDone, tasksClaimed: r.tasksClaimed, colonyTaskCycle: r.colonyTaskCycle, stats: r.stats,
+    ...(r.realm !== undefined && r.realm !== null ? { realm: r.realm } : {})
   };
 }
 
@@ -263,6 +265,8 @@ export function repair(d: SaveDTO): void {
     k.honeyTotal = Math.max(0, num(k.honeyTotal, 0));
   }
   if (!Array.isArray(m.starCodex)) m.starCodex = [];
+  if (!Array.isArray(m.popupsSeen)) m.popupsSeen = [];
+  if (m.namePending !== undefined && !Array.isArray(m.namePending)) m.namePending = [];
   m.raidWins = Math.max(0, Math.floor(num(m.raidWins ?? 0, 0)));
   m.nameSeq = Math.max(0, Math.floor(num(m.nameSeq ?? 0, 0)));
   if (m.codexFlowers === undefined) {

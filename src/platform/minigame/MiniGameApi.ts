@@ -79,6 +79,13 @@ export interface MiniGameApi {
   getPerformance?(): MiniPerformance;
   setClipboardData?(options: { data: string } & MiniCallbackOptions): void;
   getClipboardData?(options: MiniCallbackOptions): void;
+  /** 系统键盘：Canvas 界面里输入文字（蜂巢取名） */
+  showKeyboard?(options: { defaultValue: string; maxLength: number; multiple: boolean; confirmHold: boolean; confirmType: string } & MiniCallbackOptions): void;
+  hideKeyboard?(options?: MiniCallbackOptions): void;
+  onKeyboardConfirm?(callback: (res: { value: string }) => void): void;
+  offKeyboardConfirm?(callback: (res: { value: string }) => void): void;
+  onKeyboardComplete?(callback: (res: { value: string }) => void): void;
+  offKeyboardComplete?(callback: (res: { value: string }) => void): void;
   onShow(callback: (res?: unknown) => void): void;
   onHide(callback: () => void): void;
 }

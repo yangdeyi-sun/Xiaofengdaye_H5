@@ -5,6 +5,7 @@ import { GameEngine } from '../domain/GameEngine';
 import { Guide } from '../domain/Guide';
 import { createInitialState, createRun } from '../domain/NewGame';
 import { cloneState, decodeEnvelope, encodeEnvelope } from '../domain/SaveCodec';
+import { rebindRun, syncRealm } from '../domain/RealmService';
 import { decodeSaveCode, encodeSaveCode } from '../common/SaveCode';
 import type { GameMessage, GameState, OfflineReport } from '../domain/State';
 import { ALL_RES, Res, Role, SeasonId } from '../domain/Types';
@@ -240,6 +241,49 @@ export class GameSession {
     this.audio.pauseMusic();
   }
 
+  /** 同一张王国地图上、不在经营的蜂巢：后台托管实时运转 */
+  private bg: GameEngine[] = [];
+  private bgKey = '';
+  private bgState: GameState | null = null;
+
+  /** 当前种区的其它蜂巢有变化（分蜂、切换、读档）时重建托管引擎 */
+  private refreshBackground(): void {
+    const engine = this.eng;
+    if (engine === null) return;
+    const state = engine.state;
+    const region = state.run.regionId;
+    const slots = state.colonies.filter((slot) => slot.run.regionId === region && slot.run.realm !== undefined);
+    const key = `${state.activeColonyId}|${slots.map((slot) => slot.id).join(',')}`;
+    if (key === this.bgKey && this.bgState === state && this.bg.every((e, i) => e.run === slots[i]?.run)) return;
+    this.bgKey = key;
+    this.bgState = state;
+    this.bg = slots.map((slot) => GameEngine.background(DEFAULT_CONFIG, state, slot.id, slot.run));
+  }
+
+  /** 后台蜂巢跟着实时推进，然后把各蜂巢对共用花田的采集合并 */
+  private tickRealm(dt: number): void {
+    const engine = this.eng;
+    if (engine === null) return;
+    this.refreshBackground();
+    if (this.bg.length === 0) return;
+    const now = TimeService.now();
+    const state = engine.state;
+    this.bg.forEach((e) => {
+      e.advance(dt);
+      const slot = state.colonies.find((c) => c.run === e.run);
+      if (slot !== undefined) slot.lastActiveAt = now;
+    });
+    syncRealm(state, state.run.regionId);
+  }
+
+  /** 离开一段时间回来：后台蜂巢也按离线规则补算 */
+  private settleRealmOffline(elapsedSec: number, id: string): void {
+    this.refreshBackground();
+    if (this.eng === null || this.bg.length === 0) return;
+    this.bg.forEach((e, i) => e.settleOffline(elapsedSec, `${id}:bg${i}`, ''));
+    syncRealm(this.eng.state, this.eng.state.run.regionId);
+  }
+
   private frame(now: number): void {
     const engine = this.eng;
     const renderer = this.renderer;
@@ -249,7 +293,10 @@ export class GameSession {
     // 游戏速度只来自“花潮加速”广告奖励；设置里的旧速度字段不再生效
     const speed = this.adPaused ? 0 : this.ads.boostSpeed();
     try {
-      if (speed > 0) engine.advance(dt * speed);
+      if (speed > 0) {
+        engine.advance(dt * speed);
+        this.tickRealm(dt * speed);
+      }
       if (engine.run.season.season === SeasonId.WinterPrep && engine.run.season.cycleIndex !== this.checkpointCycle) {
         this.checkpointCycle = engine.run.season.cycleIndex;
         this.saveWinterCheckpoint();
@@ -399,6 +446,7 @@ export class GameSession {
     // 短暂切到后台也照常结算，避免这几秒的经营凭空消失；离开 30 秒以上才弹出收益报告
     if (elapsed.elapsedSec < 5 && elapsed.anomaly.length === 0) return;
     const report = this.eng.settleOffline(elapsed.elapsedSec, `${state.lastSavedAt}`, elapsed.anomaly);
+    this.settleRealmOffline(elapsed.elapsedSec, `${state.lastSavedAt}`);
     state.lastSavedAt = TimeService.now();
     if (report !== null && (report.credited >= AWAY_REPORT_SEC || report.anomaly.length > 0)) this.pendingOffline = report;
     this.seenMessageId = state.nextMessageId;
@@ -492,6 +540,7 @@ export class GameSession {
     state.meta.inheritance.available -= 1;
     const old = state.run;
     state.run = createRun(DEFAULT_CONFIG, old.regionId, old.regionIndex, hashSeed(`${state.meta.playerId}:recover:${Date.now()}`), 2);
+    rebindRun(state, DEFAULT_CONFIG, old, state.run, state.activeColonyId);
     state.run.res[Res.Honey] = state.run.res[Res.Honey].addN(80);
     state.run.res[Res.Nectar] = state.run.res[Res.Nectar].addN(80);
     this.useState(state);

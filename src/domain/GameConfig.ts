@@ -179,11 +179,11 @@ function fl(id: string, name: string, tier: number, yieldMul: number, maxStock: 
 
 const FLOWERS: FlowerDef[] = [
   fl('wild', '野花丛', 1, 1.0, 20, 0.25, 0, 'sunflower', '#F7C8E0', '#F2B705', false),
-  fl('sunflower', '向日葵花田', 2, 1.6, 263, 2.4, 0, 'lavender', '#FFC93C', '#7A4B1E', false),
+  fl('sunflower', '向日葵花田', 2, 1.6, 90, 1.0, 0, 'lavender', '#FFC93C', '#7A4B1E', false),
   fl('lavender', '薰衣草田', 3, 2.4, 483, 4.0, 0, 'eco', '#A88BEB', '#5B3FA0', false),
   fl('eco', '稀有生态花田', 4, 3.4, 803, 6.0, 0.004, '', '#6FD3C1', '#1F7A6C', true),
   fl('clover', '三叶草地', 1, 1.1, 33, 0.3, 0, 'sunflower', '#FFFFFF', '#79B851', false),
-  fl('rapeseed', '油菜花田', 2, 1.8, 303, 2.6, 0, 'lavender', '#F9E04B', '#C9A100', false),
+  fl('rapeseed', '油菜花田', 2, 1.8, 105, 1.1, 0, 'lavender', '#F9E04B', '#C9A100', false),
   fl('snowlotus', '雪莲', 4, 2.8, 403, 3.0, 0.008, '', '#EAF6FF', '#9CC9E8', true),
   fl('waterlily', '睡莲', 4, 2.6, 423, 3.2, 0.008, '', '#FFB7C5', '#F2D16B', true),
   fl('cactus', '仙人掌花', 4, 3.0, 363, 2.4, 0.009, '', '#FF6F61', '#4C8C3A', true),
@@ -468,10 +468,10 @@ export const DEFAULT_CONFIG: GameConfigDef = {
     minPollinations: 0,
     basePoints: 5,
     resourceBonusCap: 0.2,
-    // 2026-10-19 新规则：产卵后选择分化新蜂后，消耗 1 只幼虫 + 10 蜂王浆；25% 起，每失败一次 +2%，失败返还一半
+    // 产卵后选择分化新蜂后，消耗 1 只幼虫 + 10 蜂王浆；25% 起，每失败一次 +10%（最晚第 9 次必成），失败返还一半
     queenJelly: 10,
     queenSuccessChance: 0.25,
-    queenFailStep: 0.02,
+    queenFailStep: 0.1,
     queenMaxWaiting: 3,
     zoneMinColonies: 2
   }

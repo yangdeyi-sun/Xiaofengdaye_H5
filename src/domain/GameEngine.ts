@@ -15,6 +15,9 @@ import { RosterService, starTrait } from './RosterService';
 import { KingdomService } from './KingdomService';
 import { EventService } from './EventService';
 import { cloneState } from './SaveCodec';
+import { cleanHiveName, suggestHiveName } from './HiveNames';
+import { StewardService } from './StewardService';
+import { attachRun, ensureRealm, inheritKnowledge, pickSpot, realmMembers, refreshShares, regionOf, seedTerritoryFields, rebindRun } from './RealmService';
 
 export class UpgradePreview {
   trackId: string = '';
@@ -52,6 +55,7 @@ export class GameEngine {
   /** 分蜂前快照钩子：由基础设施层实现持久化（需求书8.3） */
   onBeforeSwarm: (snapshot: GameState) => void = () => {
   };
+  steward: StewardService | null = null;
   private acc: number = 0;
   private secTimer: number = 0;
   private lastSpan: number = 1;
@@ -84,7 +88,7 @@ export class GameEngine {
       if (star && b !== null && b.t !== undefined) {
         const t = starTrait(b.t);
         this.w.gainXp(20);
-        this.w.msg('milestone', `明星蜂诞生！${this.w.roleDef(role).name}「${b.n}」带着「${t === null ? '' : t.name}」特性：全巢${t === null ? '' : t.desc} +${t === null ? '' : this.roster.bonusText(t, 1)}`);
+        this.w.msg('milestone', `明星蜂诞生！${this.w.roleDef(role).name}「${b.n}」带着「${t === null ? '' : t.name}」特性：全巢${t === null ? '' : t.desc} +${t === null ? '' : this.roster.bonusText(t, 1)}`, 'star');
         this.w.emit('hatch', 0, 0, `明星蜂「${b.n}」`, 'hive');
       }
     };
@@ -106,6 +110,26 @@ export class GameEngine {
     this.w.refreshFlags();
     this.hive.recomputeAdjacency();
     this.w.attrs.recompute();
+    // 旧存档：已经过了新手但第一个蜂巢还没取过名，补问一次
+    const names = state.meta.colonyNames ?? {};
+    if (state.meta.tutorialDone && names[state.activeColonyId] === undefined) this.w.requestName(state.activeColonyId);
+  }
+
+  /**
+   * 托管运转的蜂巢：同一张王国地图上、不在经营的蜂巢在后台实时运转。
+   * view 共享王国的 meta，run 就是那个蜂群的 run；消息与账本各自独立，不打扰玩家。
+   */
+  static background(cfg: GameConfigDef, shared: GameState, colonyId: string, run: RunState): GameEngine {
+    const view: GameState = {
+      meta: shared.meta, run, activeColonyId: colonyId, colonies: [], messages: [], nextMessageId: 1, ledger: [],
+      nextLedgerId: 1, lastSavedAt: shared.lastSavedAt, lastTrustedTime: shared.lastTrustedTime, lastSettlementId: ''
+    };
+    const e = new GameEngine(cfg, view);
+    e.w.background = true;
+    e.w.offline = true;
+    e.w.interactive = false;
+    e.steward = new StewardService(e.w, e.hive, e.prog);
+    return e;
   }
 
   get state(): GameState {
@@ -174,6 +198,7 @@ export class GameEngine {
 
   /** 每秒执行的低频系统（时间片轮询） */
   private periodic(): void {
+    if (this.steward !== null) this.steward.tick(this.lastSpan);
     this.roster.sync();
     this.roster.attribute(this.lastSpan, this.rateView);
     this.kingdom.tick(this.lastSpan, this.rateView);
@@ -214,6 +239,7 @@ export class GameEngine {
     // 重开的蜂巢仍记得自己领过的传承点，避免重复刷分蜂奖励
     fresh.stats.legacyPaid = old.stats.legacyPaid ?? 0;
     fresh.stats.beesLost = (old.stats.beesLost ?? 0) + Object.values(old.colony.roles).reduce((n, v) => n + Math.max(0, v), 0);
+    rebindRun(this.w.s, this.w.cfg, old, fresh, this.w.s.activeColonyId);
     this.w.s.run = fresh;
     this.w.rng = new Rng(fresh.rngState);
     this.hive.reindex();
@@ -234,6 +260,7 @@ export class GameEngine {
     const seed = hashSeed(`${this.state.meta.playerId}:fall:${old.regionId}:${old.regionIndex}:${old.time}`);
     const fresh = createRun(this.w.cfg, old.regionId, old.regionIndex, seed, 0);
     ALL_RES.forEach((res: string) => { fresh.res[res] = BigNum.zero(); });
+    rebindRun(this.w.s, this.w.cfg, old, fresh, this.w.s.activeColonyId);
     this.w.s.run = fresh;
     this.w.rng = new Rng(fresh.rngState);
     this.hive.reindex();
@@ -484,8 +511,95 @@ export class GameEngine {
   }
 
   /**
+   * 原地分蜂的新蜂巢：落在同一张王国地图上（离原蜂巢不太近、领地可以重叠），
+   * 并继承原蜂巢的一些属性——内两圈的巢房布局、一半的属性等级、繁育比例、采集与守卫策略、季节进度和花田情报。
+   */
+  private settleDaughter(parent: RunState, child: RunState, childId: string): void {
+    this.placeInRealm(child, childId, parent);
+    inheritKnowledge(parent, child, 900);
+    // 巢房布局：内两圈照着原蜂巢搭好
+    const parentCells = new Map(parent.hive.cells.map((c) => [c.cellId, c]));
+    let ring = child.hive.ringLevel;
+    child.hive.cells.forEach((c) => {
+      const pc = parentCells.get(c.cellId);
+      if (pc === undefined || !pc.unlocked || pc.ring > 2) return;
+      c.unlocked = true;
+      c.building = pc.building;
+      ring = Math.max(ring, c.ring);
+    });
+    child.hive.ringLevel = ring;
+    // 属性等级：继承一半
+    Object.keys(parent.upgrades).forEach((k: string) => {
+      const lv = Math.floor(parent.upgrades[k] * 0.5);
+      if (lv > 0) child.upgrades[k] = lv;
+    });
+    // 繁育计划、采集与守卫策略、分工
+    child.colony.plan = { on: true, weights: { ...parent.colony.plan.weights }, reserve: parent.colony.plan.reserve, larvae: 0 };
+    child.colony.forageStrategy = parent.colony.forageStrategy;
+    child.colony.guardPriority = parent.colony.guardPriority;
+    child.colony.houseWaxShare = parent.colony.houseWaxShare;
+    // 主线目标已经完成过，不再重复发奖
+    child.tasksDone = parent.tasksDone.filter((id: string) => !id.startsWith('ch_'));
+    child.tasksClaimed = parent.tasksClaimed.filter((id: string) => !id.startsWith('ch_'));
+    // 季节：与原蜂巢同步，同一张地图上的四季一致
+    const ps = parent.season;
+    child.season = {
+      formal: ps.formal, season: ps.season, startedAt: ps.startedAt - parent.time, endsAt: ps.endsAt - parent.time,
+      cycleIndex: ps.cycleIndex, firstWinterProtected: ps.firstWinterProtected, wintersSurvived: 0, starving: false, starveSeconds: 0
+    };
+  }
+
+  /** 把新蜂巢摆到种区的王国地图上：选址、生成它领地里的花田、和其它蜂巢的领地对应起来 */
+  private placeInRealm(child: RunState, childId: string, near?: RunState): void {
+    const s = this.w.s;
+    const cfg = this.w.cfg;
+    const regionId = child.regionId;
+    const region = regionOf(cfg, regionId);
+    ensureRealm(s, cfg, regionId);
+    const base = near?.realm ?? realmMembers(s, regionId).find((m) => m.run.realm !== undefined && !m.run.realm.daughter)?.run.realm;
+    const spot = pickSpot(cfg, s, regionId, region, child.seed, base === undefined ? undefined : { x: base.x, y: base.y });
+    child.realm = { x: spot.x, y: spot.y, daughter: true, r: region.maxRadius * 0.78, seed: (child.seed >>> 0) % 100000 };
+    child.map.fields = [];
+    child.map.scouts = [];
+    delete child.map.bloom;
+    seedTerritoryFields(s, cfg, regionId, childId, child.realm, child.seed ^ 0x2f1);
+    attachRun(s, cfg, regionId, child, childId);
+    // 新花田可能也落在其它蜂巢的领地里：给它们补上副本
+    realmMembers(s, regionId).forEach((m) => attachRun(s, cfg, regionId, m.run, m.id));
+  }
+
+  /** 玩家给蜂群取名（1~8 个字）；同时从待取名队列里移除 */
+  renameColony(id: string, raw: string): CmdResult {
+    const name = cleanHiveName(raw);
+    if (name.length === 0) return CmdResult.fail('NAME_EMPTY', '名字不能为空');
+    const meta = this.w.s.meta;
+    if (meta.colonyNames === undefined) meta.colonyNames = {};
+    const names = meta.colonyNames;
+    const taken = Object.keys(names).some((k) => k !== id && names[k] === name);
+    if (taken) return CmdResult.fail('NAME_TAKEN', '已经有蜂巢叫这个名字了');
+    names[id] = name;
+    const slot = this.w.s.colonies.find((c) => c.id === id);
+    if (slot !== undefined) slot.name = name;
+    meta.namePending = (meta.namePending ?? []).filter((x) => x !== id);
+    this.saveRequested = true;
+    return CmdResult.ok(`蜂巢取名为「${name}」`);
+  }
+
+  /** 稍后再取名：沿用当前名字，不再追问 */
+  skipName(id: string): void {
+    const meta = this.w.s.meta;
+    meta.namePending = (meta.namePending ?? []).filter((x) => x !== id);
+    this.saveRequested = true;
+  }
+
+  /** 取名弹窗里的预设名（避开已用名字） */
+  suggestName(seed: number): string {
+    return suggestHiveName(seed, Object.values(this.w.s.meta.colonyNames ?? {}));
+  }
+
+  /**
    * 原地分蜂：只需要一只新蜂后。新蜂后带走当前蜂巢一半的资源和人口，在本种区附近建立新蜂群；
-   * 玩家继续经营当前蜂群，新蜂群出现在「蜂群切换」里。
+   * 玩家继续经营当前蜂群，新蜂巢出现在同一张王国地图上并托管运转。
    */
   swarmLocal(): CmdResult {
     const preview = this.prog.localPreview();
@@ -590,21 +704,26 @@ export class GameEngine {
       run.colony.nextBatchId = carriedBatches.length + 1;
       run.colony.hatched = Object.values(carriedRoles).reduce((sum, value) => sum + value, 0);
       run.stats.peakPop = run.colony.hatched;
+      if (kind === 'local') this.settleDaughter(parentRun, run, newId);
+      else if (realmMembers(this.w.s, nextRegion).length > 0) this.placeInRealm(run, newId);
       const newName = this.nameNewColony(newId, nextRegion);
+      this.w.requestName(newId);
       const now = Date.now();
       const legacy = `获得 ${points} 传承点（全巢产量永久 +${points * 2}%）`;
       if (kind === 'local') {
-        // 原地分蜂：玩家留在原蜂群，新蜂群离开期间按离线规则自己经营
+        // 原地分蜂：玩家留在原蜂群；新蜂巢在同一张王国地图上托管运转
         this.w.s.colonies.push({ id: newId, name: newName, run: run, lastActiveAt: now });
+        refreshShares(this.w.s, nextRegion);
         this.hive.recomputeAdjacency();
         this.w.attrs.recompute();
         this.w.gainXp(40);
-        this.w.msg('swarm', `原地分蜂完成！新蜂后带着一半蜂群和资源在附近建立了「${newName}」。${this.w.region().name}现在有 ${this.prog.regionColonies()} 个蜂群${points > 0 ? `，${legacy}` : ''}。可以在「蜂群切换」里随时过去经营。`);
+        this.w.msg('swarm', `原地分蜂完成！新蜂后带着一半蜂群和资源在附近建立了「${newName}」。${this.w.region().name}现在有 ${this.prog.regionColonies()} 个蜂群${points > 0 ? `，${legacy}` : ''}。它在同一张地图上托管运转，点它就能切换过去。`);
         this.w.emit('swarm', 0, 0, newName, 'any');
       } else {
         this.w.s.colonies.push({ id: parentId, name: parentName, run: parentRun, lastActiveAt: now });
         this.w.s.activeColonyId = newId;
         this.w.s.run = run;
+        if (run.realm !== undefined) refreshShares(this.w.s, nextRegion);
         this.w.rng = new Rng(run.rngState);
         this.hive.reindex();
         this.w.alloc = [];
@@ -661,8 +780,8 @@ export class GameEngine {
       this.step(dt);
       left -= dt;
     }
-    this.w.offline = false;
-    this.w.interactive = true;
+    this.w.offline = this.w.background;
+    this.w.interactive = !this.w.background;
     this.w.econ.tick(0, true);
     const gains: Record<string, string> = {};
     ALL_RES.forEach((r: string) => {
