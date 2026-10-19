@@ -28,6 +28,7 @@ import { LUCKY_HATCHES, STAR_MAX_LEVEL, STAR_TRAITS, starTrait } from '../domain
 import type { NamedBee } from '../domain/State';
 import { legacyAura } from '../domain/World';
 import { costMulFor } from '../domain/HiveService';
+import { BEAR_DESTROY_CHANCE, POWER_PER_CYCLE } from '../domain/ThreatService';
 import type { WatchResult } from './ads/AdService';
 import { PresentationQueue } from './PresentationQueue';
 import { browserEnvironment, isInputElement, isUiElement } from './ui/UiEnvironment';
@@ -167,6 +168,8 @@ export class GameUI {
   /** 蜜蜂信息卡：名册编号，-1 表示没有打开 */
   private beeCard = -1;
   private eventModal = false;
+  /** 已经自动弹过的季节事件（每个事件只自动弹一次） */
+  private eventPromptKey = '';
   private rosterTab = 'all';
   private swarmTarget = '';
   private hiddenHint = '';
@@ -846,10 +849,17 @@ export class GameUI {
       this.session.recoveredNotice = '';
     }
     const bear = this.engine().threats.pendingBear();
-    if (bear !== null && bear.phase === 'warning' && !this.automaticPresentationBlocked() && this.presentations.empty) {
+    // 熊来袭是紧急事件：不等玩家关掉面板，直接弹出（广告、法律条款、确认框、拖动中除外）
+    const bearUrgent = bear !== null && bear.phase === 'warning' && !this.session.ads.busy && this.legal.length === 0 &&
+      this.offlineReport === null && this.confirmState === null && this.pointers.size === 0 && !this.rangeActive;
+    if (bear !== null && bearUrgent) {
       const key = `${bear.eventId}:${bear.postponed}`;
       if (key !== this.bearPromptKey) {
         this.bearPromptKey = key;
+        if (this.panel.length > 0) this.closePanel(false);
+        this.drawerOpen = false;
+        this.placing = '';
+        this.movingCell = '';
         this.bearModal = true;
       }
     }
@@ -860,6 +870,8 @@ export class GameUI {
       if (notice.kind === 'season' && this.engine().state.meta.settings.eventAnimations) {
         this.showEvent(seasonName(this.engine().run.season.season), notice.text,
           seasonIcon(this.engine().run.season.season), 2600);
+      } else if (notice.kind === 'error' && notice.text.includes('熊')) {
+        this.showEvent('蜂巢被熊摧毁', notice.text, 'xf_enemy_bear', 6000);
       } else if (!(notice.kind === 'threat' && notice.text.includes('熊'))) this.showBanner(notice.text, notice.kind);
       notice = this.session.popNotice();
     }
@@ -873,6 +885,14 @@ export class GameUI {
       banners.forEach((text) => this.showBanner(text, 'milestone'));
     }
     this.syncPresentation();
+    // 季节事件：玩家空闲时自动弹出一次；“稍后再说”后只保留顶部事件条
+    const seasonEvent = this.engine().events.active();
+    if (seasonEvent !== null && seasonEvent.key !== this.eventPromptKey && !this.automaticPresentationBlocked() &&
+      this.presentations.empty && this.engine().events.view() !== null) {
+      this.eventPromptKey = seasonEvent.key;
+      this.eventModal = true;
+      this.session.audio.play('codex_new');
+    }
     if (!this.automaticPresentationBlocked() && this.presentations.empty) {
       const topic = this.session.guide().pendingIntro();
       if (topic !== null) {
@@ -1256,14 +1276,21 @@ export class GameUI {
     return `<button class="season-chip kingdom-chip" data-action="open-panel" data-id="tasks" title="王国等级">${icon('xf_building_queen', '王国')}<span><b>Lv${k.level}</b><small>${Math.floor(ratio * 100)}%</small></span></button>`;
   }
 
-  /** 顶部事件条：保卫战 > 季节事件 > 蜂后的心愿 > 蜜流花 > 春季补给 */
+  /** 顶部事件条：熊 > 保卫战 > 季节事件 > 蜂后的心愿 > 蜜流花 > 春季补给 */
   private renderEventChip(): string {
     const e = this.engine();
+    const bear = e.threats.pendingBear();
+    if (bear !== null && (bear.phase === 'active' || bear.phase === 'warning')) {
+      const left = Math.max(0, Math.ceil(bear.endsAt - e.run.time));
+      const hp = Math.max(0, Math.round(bear.hp / Math.max(1, bear.maxHp) * 100));
+      const text = bear.phase === 'active' ? `正在抢蜜！熊还剩 ${hp}% 体力 · ${left} 秒内赶走它` : `正在接近蜂巢 · ${left} 秒后到达`;
+      return `<button type="button" class="bloom-chip raid-chip" data-action="${bear.phase === 'active' ? 'goto-bear' : 'open-bear'}">${icon('xf_enemy_bear')}<span><b>熊来袭</b><small>${h(text)}</small></span><i>${bear.phase === 'active' ? '拍它 ›' : '应对 ›'}</i></button>`;
+    }
     const raid = e.threats.raidView();
     if (raid !== null) {
       const text = raid.phase === 'warn'
         ? `胡蜂窝来袭！${Math.ceil(raid.remaining)} 秒后第一波到达`
-        : `第 ${raid.wave}/3 波 · 还剩 ${raid.left} 只${raid.boss ? '（胡蜂王）' : ''} · ${clock(raid.remaining)}`;
+        : `第 ${raid.wave}/${raid.waves} 波 · 还剩 ${raid.left} 只${raid.boss ? '（胡蜂王）' : ''} · ${clock(raid.remaining)}`;
       return `<button type="button" class="bloom-chip raid-chip" data-action="goto-raid">${icon('xf_enemy_wasp')}<span><b>蜂巢保卫战</b><small>${h(text)}</small></span><i>迎战 ›</i></button>`;
     }
     const ev = e.events.view();
@@ -1316,7 +1343,7 @@ export class GameUI {
     if (key === 'build') return e.hive.buildingOptions().some((def) => e.w.count(def.id) === 0 &&
       e.hive.buildingAvailable(def.id) && e.w.econ.canAfford(e.hive.buildCost(def.id)));
     if (key === 'eco') return e.threats.activeList().length > 0 || e.run.season.starving;
-    if (key === 'swarm') return e.swarmPreview().ready;
+    if (key === 'swarm') return e.swarmPreview().ready || e.run.colony.youngQueens > 0;
     return false;
   }
 
@@ -1413,7 +1440,7 @@ export class GameUI {
       return `<div class="compact-row">${icon(roleIcon(batch.targetRole))}<span>${h(text)}</span>${button('cancel-batch', batch.started ? '取消（返还50%）' : '取消', { id: String(batch.batchId) })}</div>`;
     }).join('');
     const canLay = e.colony.canLay();
-    return this.panelFrame('蜂后与幼虫', 'xf_nav_queen', `<p>蜂群 ${e.w.population()} / ${e.w.popCap()}（成年 ${e.w.adults()}，幼虫 ${colony.larvae}，孵化中 ${e.w.inHatch()}）</p>${this.renderBreedPlan()}<div class="action-line">${button('lay', '孵化新卵', { primary: true, disabled: !canLay.ok })}<span>孵化新卵消耗 ${h(costStr(e.colony.eggCost()))}${colony.layCooldown > 0 ? ` · 休息 ${Math.ceil(colony.layCooldown)} 秒` : ''}</span></div>${!canLay.ok ? `<p class="warning">${h(canLay.message)}</p>` : ''}<p class="muted">每次点击孵化获得幼虫，然后选择工种分化。新卵费用随累计孵化次数递增。开启繁育计划后蜂后会自动繁育（离线也会），手动孵化和分化随时可以插队。</p><p class="muted">${icon('xf_status_rare')} 每孵化一只，有 ${pct(e.roster.starChance())} 的概率额外诞生一只明星蜂${(colony.luckyHatch ?? 0) > 0 ? `（幸运孵化还剩 ${colony.luckyHatch} 只）` : ''}${(e.kingdom.state().starEggs ?? 0) > 0 ? ` · 明星蜂卵 ${e.kingdom.state().starEggs} 颗，下次必出` : ''}。</p>${(colony.luckyHatch ?? 0) <= 0 ? this.adButton('ad-lucky', `幸运孵化：接下来 ${LUCKY_HATCHES} 只更容易出明星蜂`, AdPlacement.LuckyHatch, { primary: false }) : ''}<hr><h3 class="section-title">选择幼虫分化工种</h3>${roleCards}<hr><h3 class="section-title">孵化队列 ${colony.batches.filter((batch) => batch.started).length} / ${e.colony.hatchSlots()}</h3>${batches}<hr><h3 class="section-title">蜂后室升级</h3>${this.renderUpgradeList(Bld.Queen)}`);
+    return this.panelFrame('蜂后与幼虫', 'xf_nav_queen', `<p>蜂群 ${e.w.population()} / ${e.w.popCap()}（成年 ${e.w.adults()}，幼虫 ${colony.larvae}，孵化中 ${e.w.inHatch()}）</p>${this.renderBreedPlan()}<div class="action-line">${button('lay', '孵化新卵', { primary: true, disabled: !canLay.ok })}<span>孵化新卵消耗 ${h(costStr(e.colony.eggCost()))}${colony.layCooldown > 0 ? ` · 休息 ${Math.ceil(colony.layCooldown)} 秒` : ''}</span></div>${!canLay.ok ? `<p class="warning">${h(canLay.message)}</p>` : ''}<p class="muted">每次点击孵化获得幼虫，然后选择工种分化。新卵费用随累计孵化次数递增。开启繁育计划后蜂后会自动繁育（离线也会），手动孵化和分化随时可以插队。</p><p class="muted">${icon('xf_status_rare')} 每孵化一只，有 ${pct(e.roster.starChance())} 的概率额外诞生一只明星蜂${(colony.luckyHatch ?? 0) > 0 ? `（幸运孵化还剩 ${colony.luckyHatch} 只）` : ''}${(e.kingdom.state().starEggs ?? 0) > 0 ? ` · 明星蜂卵 ${e.kingdom.state().starEggs} 颗，下次必出` : ''}。</p>${(colony.luckyHatch ?? 0) <= 0 ? this.adButton('ad-lucky', `幸运孵化：接下来 ${LUCKY_HATCHES} 只更容易出明星蜂`, AdPlacement.LuckyHatch, { primary: false }) : ''}<hr><h3 class="section-title">选择幼虫分化工种</h3>${roleCards}${e.w.unlocked('t_survive_winter') || e.state.meta.swarmCount > 0 ? this.renderQueenRearCard() : ''}<hr><h3 class="section-title">孵化队列 ${colony.batches.filter((batch) => batch.started).length} / ${e.colony.hatchSlots()}</h3>${batches}<hr><h3 class="section-title">蜂后室升级</h3>${this.renderUpgradeList(Bld.Queen)}`);
   }
 
   /** 繁育计划卡片：开关、各工种比例、保留蜂蜜 */
@@ -1644,17 +1671,25 @@ export class GameUI {
       let phase = '交战中';
       if (event.phase === 'warning') phase = `${Math.max(0, Math.ceil(event.endsAt - e.run.time))} 秒后到达`;
       else if (event.phase === 'postponed') phase = `暂时离开，${formatDuration(event.endsAt - e.run.time)}后返回`;
-      const bearActions = event.type === 'bear' && event.phase !== 'active'
-        ? `<div class="choice-row">${button('bear-choice', '集结防守', { id: event.eventId, value: 'defend', primary: true })}${button('bear-choice', '交付蜂蜜', { id: event.eventId, value: 'tribute' })}${button('bear-choice', '稍后处理', { id: event.eventId, value: 'later' })}</div>${this.adButton('ad-bear-aid', '请邻巢援军', AdPlacement.BearAid, { id: event.eventId, primary: false })}` : '';
+      const bearActions = event.type === 'bear'
+        ? `<div class="choice-row">${event.phase === 'active' ? button('goto-bear', '去拍走它', { primary: true }) : button('bear-choice', '迎战', { id: event.eventId, value: 'defend', primary: true })}</div>${this.adButton('ad-bear-aid', '请邻巢援军', AdPlacement.BearAid, { id: event.eventId, primary: false })}` : '';
       const loot = e.threats.rewardFor(event.type, false).filter((r) => r.amount > 0).map((r) => `${num1(r.amount)} ${resName(r.res)}`).join('、');
       const goBtn = event.phase === 'active' && event.type !== 'bear'
         ? button('goto-threat', event.type === 'moth' ? '进蜂巢拍走它' : '去拍走它', { id: event.eventId, primary: true }) : '';
-      return panelCard(`<div class="card-head">${icon(threatIcon(event.type))}<div><h3>${h(def.name)} @ ${h(where)}</h3><p>${h(phase)} · 剩余 ${Math.max(0, Math.ceil(event.hp))}/${Math.ceil(event.maxHp)}</p><small>${h(`击退奖励约 ${loot}，亲手击退再多 50%`)}</small></div></div>${goBtn}${bearActions}`, true);
+      const killed = (event.killed ?? 0) > 0 ? ` · 已咬死 ${event.killed} 只` : '';
+      return panelCard(`<div class="card-head">${icon(threatIcon(event.type))}<div><h3>${h(def.name)} @ ${h(where)}</h3><p>${h(phase)} · 剩余 ${Math.max(0, Math.ceil(event.hp))}/${Math.ceil(event.maxHp)}${h(killed)}</p><small>${h(`击退奖励约 ${loot}，亲手击退再多 50%`)}</small></div></div>${goBtn}${bearActions}`, true);
     }).join('');
     const injured = e.w.injured(Role.Forager) + e.w.injured(Role.House);
-    let threatSection = '<p class="muted">建成第一个功能建筑后，敌害会开始低频出现；新手阶段结束后频率和强度都会提高。</p>';
+    let threatSection = '<p class="muted">建成第一个功能建筑后，敌害会开始低频出现；新手阶段结束后会咬死蜜蜂，并且每个四季轮回都更强。</p>';
     if (e.run.threats.enabled) {
-      threatSection = `<h3 class="section-title">${icon('xf_status_danger')} 敌害</h3><p>${h(guardLine)}</p>${threats.length > 1 ? `<p class="warning">同时存在 ${threats.length} 个敌害，守卫会分区，单个目标获得的攻击力下降。</p>` : ''}${injured > 0 ? `<p class="muted">${icon('xf_status_injured')} 受伤休养中的工蜂 ${injured} 只，会逐渐恢复。</p>` : ''}${(e.run.threats.streak ?? 0) > 0 ? `<p class="ok">连续击退 ${e.run.threats.streak} 次 · 再击退 ${5 - (e.run.threats.streak ?? 0) % 5} 次额外得 1 蜂王浆</p>` : ''}${threats.length === 0 ? `${artImage('state_no_threats', '没有威胁', 'empty-art')}<p class="ok">目前没有威胁</p>` : threatCards}<p class="muted">新手结束后每隔几分钟出现一只，夏季最多、冬季很少。点地图上的敌害可以亲手驱赶，奖励随蜂巢产量增长；有敌害自己溜走会中断连胜。离线期间不会生成新敌害或发生熊袭击。</p>`;
+      const dv = e.threats.defenseView();
+      const lost = e.run.stats.beesLost ?? 0;
+      const lethalLine = dv.lethal
+        ? `<p class="${dv.mitig > 0.6 ? 'warning' : 'muted'}">敌害强度 ×${num1(dv.power)}（每个四季轮回 +${Math.round(POWER_PER_CYCLE * 100)}%）· 守卫全力出动时伤亡降到 ${pct(dv.mitig)}${lost > 0 ? ` · 本蜂群累计牺牲 ${lost} 只` : ''}</p><p class="muted">新手结束后，敌害会咬死蜜蜂：胡蜂、蛛网咬采集蜂，蜡螟毁幼虫，熊先打守卫。守卫蜂越多、攻击效率越高，伤亡越少。</p>`
+        : '<p class="muted">新手阶段敌害只会让蜜蜂受伤；新手结束后会开始咬死蜜蜂。</p>';
+      const bearLine = e.threats.bearEligible()
+        ? `<p class="muted">熊：建成采集蜂巢房后不定时出没（冬天冬眠）。赶走它有蜂王浆；赶不走 ${Math.round(BEAR_DESTROY_CHANCE * 100)}% 整个蜂巢被掀翻、其余时候上缴蜂蜜。</p>` : '';
+      threatSection = `<h3 class="section-title">${icon('xf_status_danger')} 敌害</h3><p>${h(guardLine)}</p>${lethalLine}${bearLine}${threats.length > 1 ? `<p class="warning">同时存在 ${threats.length} 个敌害，守卫会分区，单个目标获得的攻击力下降。</p>` : ''}${injured > 0 ? `<p class="muted">${icon('xf_status_injured')} 受伤休养中的工蜂 ${injured} 只，会逐渐恢复。</p>` : ''}${(e.run.threats.streak ?? 0) > 0 ? `<p class="ok">连续击退 ${e.run.threats.streak} 次 · 再击退 ${5 - (e.run.threats.streak ?? 0) % 5} 次额外得 1 蜂王浆</p>` : ''}${threats.length === 0 ? `${artImage('state_no_threats', '没有威胁', 'empty-art')}<p class="ok">目前没有威胁</p>` : threatCards}<p class="muted">新手结束后每隔几分钟出现一只，夏季最多、冬季很少。点地图上的敌害可以亲手驱赶，奖励随蜂巢产量增长；有敌害自己溜走会中断连胜。离线期间不会生成新敌害、不会死蜂，也不会发生熊袭击。</p>`;
     }
     const starving = season.starving ? `<p class="warning">${icon('xf_status_stopped')} ${season.starveSeconds >= 150 ? '严重饥饿：蜂群正在缓慢减员' : (season.starveSeconds >= 60 ? '持续饥饿：产卵与孵化受限' : '部分蜜蜂因缺蜜暂停工作')}</p>` : '';
     const timed = e.events.effects();
@@ -1698,32 +1733,49 @@ export class GameUI {
     return this.panelFrame('进化腔', 'xf_nav_evolution', `${tabs}<h3 class="section-title">可用传承点 ${inheritance.available} / 累计 ${inheritance.totalPoints}</h3><p class="ok">传承加成：每个累计传承点让全巢产量 +2%，当前 +${Math.round(legacyAura(inheritance.totalPoints) * 100)}%（不需要投入，自动生效）。</p><p class="muted">传承天赋永久作用于之后所有种区；每条路线投入足够点数后开放改变规则的关键能力。</p><div class="tab-row">${branchButtons}</div>${talents}<hr><h3 class="section-title">天赋预设</h3>${presets}${button('confirm-reset-talents', resetLabel, {})}`);
   }
 
+  /** 新蜂后分化卡片：分蜂面板与蜂后面板共用 */
+  private renderQueenRearCard(): string {
+    const e = this.engine();
+    const colony = e.run.colony;
+    const sc = e.w.cfg.swarm;
+    const chance = Math.round(e.colony.queenChance() * 100);
+    const fails = colony.queenFails ?? 0;
+    const can = e.colony.canRearQueen();
+    const waiting = colony.youngQueens > 0 ? `<p class="ok">${icon('xf_status_complete')} 已有 ${colony.youngQueens} 只新蜂后在等待带队</p>` : '';
+    const reason = !can.ok && colony.youngQueens < sc.queenMaxWaiting ? `<p class="muted">${h(can.message)}</p>` : '';
+    return panelCard(`<div class="heading-line">${icon('xf_building_queen')}<h3>分化新蜂后</h3></div>${waiting}<p>选一只幼虫，喂 ${sc.queenJelly} 蜂王浆把它培育成新蜂后。这次成功率 <b>${chance}%</b>；每失败一次 +${Math.round(sc.queenFailStep * 100)}%，失败返还一半蜂王浆，幼虫仍留作普通幼虫。${fails > 0 ? `已连续失败 ${fails} 次。` : ''}</p><small class="muted">需要：1 只幼虫（现有 ${colony.larvae}）· ${sc.queenJelly} 蜂王浆（现有 ${Math.floor(e.w.econ.num(Res.Jelly))}）</small>${reason}<div class="choice-row">${colony.larvae <= 0 ? button('lay', '先孵化一枚新卵', { disabled: !e.colony.canLay().ok }) : ''}${button('rear-queen', '分化新蜂后', { primary: true, disabled: !can.ok })}</div>`);
+  }
+
   private renderSwarmPanel(): string {
     const e = this.engine();
-    const preview = e.swarmPreview();
-    const regions = e.w.cfg.regions.filter((region: RegionDef) => region.id !== e.run.regionId);
-    if (!regions.some((region) => region.id === this.swarmTarget)) this.swarmTarget = '';
+    const region = e.w.region();
+    const preview = e.swarmPreview(this.swarmTarget);
+    const local = e.localPreview();
+    const regions = e.prog.zoneTargets();
+    if (!regions.some((item) => item.id === this.swarmTarget)) this.swarmTarget = '';
+    const here = e.prog.regionColonies();
     const conditions = preview.conditions.map((condition: SwarmCondition) => `<p class="condition ${condition.met ? 'met' : ''}">${condition.met ? '✓' : '○'} ${h(condition.label)}　${Math.floor(condition.current)} / ${condition.target}</p>`).join('');
-    const sources = preview.sources.map((source) => `<p>${h(source.label)} <b>+${source.points}</b></p>`).join('');
-    const nextGen = e.run.regionIndex + 1;
-    const regionCards = regions.map((region) => {
-      const mastery = e.w.cfg.achievements.find((a) => a.id === `a_${region.id}`);
+    const sources = preview.sources.map((source) => `<p>${h(source.label)} <b>${source.points >= 0 ? '+' : ''}${source.points}</b></p>`).join('');
+    const localSources = local.sources.filter((source) => source.points !== 0).map((source) => `<p>${h(source.label)} <b>${source.points >= 0 ? '+' : ''}${source.points}</b></p>`).join('');
+    const regionCards = regions.map((item) => {
+      const mastery = e.w.cfg.achievements.find((a) => a.id === `a_${item.id}`);
       const masteryDone = mastery !== undefined && e.state.meta.achievements.includes(mastery.id);
-      return `<button type="button" class="region-card${this.swarmTarget === region.id ? ' selected' : ''}" data-action="swarm-target" data-id="${h(region.id)}">${artImage(`region_${regionArt(region.id)}`, region.name)}<span><b>${h(region.name)}</b><em>难度 ${'★'.repeat(region.difficulty + 1)} · 新巢成本 ×${costMulFor(nextGen, region.difficulty)} · 难度传承点 +${region.difficulty * 4}</em><small>${h(region.desc)}</small><small>${h(region.rule)}</small>${mastery !== undefined ? `<small>${masteryDone ? '✓ ' : ''}专属成就「${h(mastery.name)}」：${h(mastery.desc)}</small>` : ''}</span></button>`;
+      const need = e.prog.zoneColoniesNeeded(item);
+      const open = here >= need;
+      const gate = `<small class="${open ? 'ok' : 'warning'}">${open ? '✓' : '🔒'} 开启条件：${h(region.name)}有 ${need} 个蜂群（现在 ${here} 个）</small>`;
+      const rare = e.w.flower(item.rareFlower);
+      return `<button type="button" class="region-card${this.swarmTarget === item.id ? ' selected' : ''}${open ? '' : ' locked'}" data-action="swarm-target" data-id="${h(item.id)}">${artImage(`region_${regionArt(item.id)}`, item.name)}<span><b>${h(item.name)}</b><em>难度 ${'★'.repeat(item.difficulty + 1)} · 新巢成本 ×${costMulFor(item.difficulty)} · 难度传承点 +${item.difficulty * 4}</em>${gate}<small>${h(item.desc)}</small><small>${h(item.rule)}</small><small>专属稀有花：${h(rare.name)}</small>${mastery !== undefined ? `<small>${masteryDone ? '✓ ' : ''}专属成就「${h(mastery.name)}」：${h(mastery.desc)}</small>` : ''}</span></button>`;
     }).join('');
     const illustration = e.state.meta.swarmCount > 0 && e.run.time < 300 ? 'illustration_split_arrive'
       : (preview.ready ? 'illustration_split_depart' : 'illustration_split_prepare');
-    const queenReady = e.run.colony.youngQueens > 0;
-    const queenCost = e.colony.queenCost();
-    const chance = Math.round(e.colony.queenChance() * 100);
-    const fails = e.run.colony.queenFails ?? 0;
-    const queenCard = panelCard(`<div class="heading-line">${icon('xf_building_queen')}<h3>培育新蜂后</h3>${queenReady ? icon('xf_status_complete') : ''}</div><p>${queenReady ? '新蜂后已经准备好，可以带领分蜂。' : `每次投入 ${h(costStr(queenCost))}，这次成功率 <b>${chance}%</b>${chance >= 100 ? '（必定成功）' : ''}。失败返还一半资源，每失败一次成功率 +15%，最多 4 次必成。${fails > 0 ? `已连续失败 ${fails} 次。` : ''}`}</p>${queenReady ? '' : button('rear-queen', '尝试分化蜂后', { primary: true, disabled: !e.w.econ.canAfford(queenCost) })}`);
     const fallWarning = e.run.hive.fallAt > 0
-      ? `<p class="warning">${icon('xf_status_danger')} 蜂巢已达扩建上限，预计最迟 ${formatDuration(e.hive.fallRemaining())} 内掉落。请在掉落前完成分蜂。</p>` : '';
+      ? `<p class="warning">${icon('xf_status_danger')} 蜂巢已达扩建上限，预计最迟 ${formatDuration(e.hive.fallRemaining())} 内掉落。分蜂（原地或远征都行）能给蜂巢减压、重新计算期限。</p>` : '';
     const points = e.state.meta.inheritance.totalPoints;
     const legacyNow = Math.round(legacyAura(points) * 100);
     const legacyNext = Math.round(legacyAura(points + preview.total) * 100);
-    return this.panelFrame('分蜂迁徙', 'xf_nav_split', `${artImage(illustration, '分蜂迁徙', 'wide-art')}${fallWarning}<p class="muted">新蜂后会带走当前一半人口和资源建立新巢（明星蜂优先跟随）；原蜂巢保留另一半。</p><p class="ok">传承加成：现在全巢产量 +${legacyNow}%，这次分蜂后 +${legacyNext}%（每个累计传承点 +2%，永久有效）。</p><p class="muted">本巢成本倍率 ×${e.hive.constructionCostMul()}；新巢倍率看下面各种区，难度越高越贵，但传承点更多。</p>${queenCard}<h3 class="section-title">分蜂条件</h3>${conditions}<hr><h3 class="section-title">预计获得传承点 ${preview.total}</h3>${sources}<hr><div class="two-column"><div><h3>新巢重建</h3><ul class="reset-list">${preview.resets.map((item) => `<li>${h(item)}</li>`).join('')}</ul></div><div><h3>共同保留</h3><ul class="keep-list">${preview.keeps.map((item) => `<li>${h(item)}</li>`).join('')}</ul></div></div><hr><h3 class="section-title">选择新种区</h3>${regionCards}${button('confirm-swarm', '发起分蜂', { primary: true, disabled: !preview.ready || this.swarmTarget.length === 0 })}`);
+    const queenCard = this.renderQueenRearCard();
+    const localCard = panelCard(`<div class="heading-line">${icon('xf_nav_swarm')}<h3>原地分蜂 · ${h(region.name)}</h3></div><p>只需要一只新蜂后：她带走当前蜂巢一半的资源和人口，在附近建立新蜂群（明星蜂优先跟随）。你继续经营当前蜂群，新蜂群出现在「蜂群切换」里。</p><p class="${here >= 2 ? 'ok' : 'muted'}">${h(region.name)}现在有 ${here} 个蜂群${regions.length > 0 ? ` · 远征最容易的种区需要 ${Math.min(...regions.map((item) => e.prog.zoneColoniesNeeded(item)))} 个` : ''}</p>${local.total > 0 ? `<h3 class="section-title">原地分蜂可得传承点 ${local.total}</h3>${localSources}` : '<p class="muted">原地分蜂只结算生态目标、累计产量和剩余资源的传承点；这个蜂群目前没有可领取的。</p>'}${button('confirm-local-swarm', local.ready ? '原地分蜂' : '需要一只新蜂后', { primary: true, disabled: !local.ready })}`);
+    return this.panelFrame('分蜂迁徙', 'xf_nav_split', `${artImage(illustration, '分蜂迁徙', 'wide-art')}${fallWarning}<p class="ok">传承加成：现在全巢产量 +${legacyNow}%，远征分蜂后 +${legacyNext}%（每个累计传承点 +2%，永久有效）。</p><p class="muted">本巢成本倍率 ×${e.hive.constructionCostMul()}：新巢成本只看种区难度，不再逐代翻倍。</p>${queenCard}${localCard}<hr><h3 class="section-title">远征新种区（种区分蜂）</h3><p class="muted">种区像副本：出发地的蜂群数量够了才能开启（最少 2 个，难度越高越多），还要达成蜂群发展条件。</p>${conditions}<hr><h3 class="section-title">预计获得传承点 ${preview.total}</h3>${sources}<hr><div class="two-column"><div><h3>新巢重建</h3><ul class="reset-list">${preview.resets.map((item) => `<li>${h(item)}</li>`).join('')}</ul></div><div><h3>共同保留</h3><ul class="keep-list">${preview.keeps.map((item) => `<li>${h(item)}</li>`).join('')}</ul></div></div><hr><h3 class="section-title">选择新种区</h3>${regionCards}${button('confirm-swarm', this.swarmTarget.length === 0 ? '先选择一个种区' : '远征分蜂', { primary: true, disabled: !preview.ready || this.swarmTarget.length === 0 })}`);
   }
 
   private renderColoniesPanel(): string {
@@ -2029,9 +2081,15 @@ export class GameUI {
   }
 
   private renderBearOverlay(event: ThreatEvent): string {
-    const tribute = Math.round(this.engine().threats.bearTribute());
-    const seconds = Math.max(0, Math.ceil(event.endsAt - this.engine().run.time));
-    return `<div class="modal-layer threat-layer"><section class="modal-card bear-card">${artImage('badge_bear', '熊来袭', 'bear-badge')}<h2>${icon('xf_enemy_bear')} 熊来袭</h2><p>熊循着蜜香靠近蜂巢，约 ${seconds} 秒后开始抢蜜。蜂巢不会被摧毁。</p><div class="choice-stack">${button('bear-choice', '集结守卫蜂防守', { id: event.eventId, value: 'defend', primary: true })}${button('bear-choice', `交付 ${tribute} 蜂蜜让它离开`, { id: event.eventId, value: 'tribute' })}${this.adButton('ad-bear-aid', '请邻巢援军赶走熊（不损失蜂蜜）', AdPlacement.BearAid, { id: event.eventId, primary: false })}${button('bear-choice', event.postponed >= 2 ? '不能再稍后处理' : '稍后处理（10分钟后回来）', { id: event.eventId, value: 'later', disabled: event.postponed >= 2 })}</div></section></div>`;
+    const e = this.engine();
+    const tribute = Math.round(e.threats.bearTribute());
+    const seconds = Math.max(0, Math.ceil(event.endsAt - e.run.time));
+    const guards = e.w.active(Role.Guard);
+    const stakes = e.state.meta.tutorialDone
+      ? `<p class="warning">赶不走它的话：${Math.round(BEAR_DESTROY_CHANCE * 100)}% 会把整个蜂巢掀翻（这个蜂群从零开始），${100 - Math.round(BEAR_DESTROY_CHANCE * 100)}% 蜜蜂上缴约 ${num1(tribute)} 蜂蜜。</p>`
+      : '<p class="muted">新手阶段熊只会抢走一点蜂蜜。</p>';
+    const tip = guards > 0 ? `守卫蜂 ${guards} 只会集结到巢门，你也可以直接点熊拍打（按住连拍）。` : '还没有守卫蜂：直接点熊拍打（按住连拍）就能赶走它。';
+    return `<div class="modal-layer threat-layer"><section class="modal-card bear-card">${artImage('badge_bear', '熊来袭', 'bear-badge')}<h2>${icon('xf_enemy_bear')} 熊来袭</h2><p>熊循着蜜香靠近蜂巢，约 ${seconds} 秒后开始抢蜜。${h(tip)}</p>${stakes}<div class="choice-stack">${button('bear-choice', '迎战！去拍走它', { id: event.eventId, value: 'defend', primary: true })}${this.adButton('ad-bear-aid', '请邻巢援军赶走熊（不损失蜂蜜）', AdPlacement.BearAid, { id: event.eventId, primary: false })}${button('bear-close', '先准备一下')}</div></section></div>`;
   }
 
   private renderBoostOverlay(): string {
@@ -2166,9 +2224,10 @@ export class GameUI {
       case 'lay': this.feedback(e.lay()); break;
       case 'hatch': this.feedback(e.differentiate(id, Number(value) || 1)); break;
       case 'rear-queen': {
-        this.requestConfirm('尝试分化新蜂后', `将消耗 ${costStr(e.colony.queenCost())}，成功率为25%；失败不会返还资源。`, '确认培育', () => {
+        const chance = Math.round(e.colony.queenChance() * 100);
+        this.requestConfirm('分化新蜂后', `将消耗 1 只幼虫和 ${costStr(e.colony.queenCost())}，这次成功率 ${chance}%。失败返还一半蜂王浆，幼虫仍留作普通幼虫，下次成功率 +${Math.round(e.w.cfg.swarm.queenFailStep * 100)}%。`, '确认分化', () => {
           this.feedback(e.differentiateQueen());
-        });
+        }, false);
         return;
       }
       case 'cancel-batch': this.feedback(e.cancelBatch(Number(id))); break;
@@ -2188,8 +2247,22 @@ export class GameUI {
       case 'bear-choice': {
         const result = e.bearChoice(id, value);
         this.feedback(result);
-        if (result.ok) { this.bearModal = false; this.bearPromptKey = ''; }
+        if (result.ok) {
+          this.bearModal = false;
+          this.closePanel(false);
+          this.goTo('field', 'field');
+          this.session.renderer?.lookAtThreat(id);
+        }
         break;
+      }
+      case 'bear-close': this.bearModal = false; break;
+      case 'open-bear': this.bearModal = true; this.closePanel(false); this.refreshGame(true); return;
+      case 'goto-bear': {
+        const bear = e.threats.pendingBear();
+        this.closePanel(false);
+        this.goTo('field', 'field');
+        if (bear !== null) this.session.renderer?.lookAtThreat(bear.eventId);
+        return;
       }
       case 'recover-colony': {
         const ok = this.session.recoverColonyWithPoint();
@@ -2215,6 +2288,7 @@ export class GameUI {
       case 'confirm-reset-talents': this.requestConfirm('重置全部传承天赋', `已投入的传承点会全部返还${e.prog.resetCost() > 0 ? `，需要 ${e.prog.resetCost()} 蜂王浆` : '，首次重置免费'}。`, '确认重置', () => this.feedback(e.resetTalents())); return;
       case 'swarm-target': this.swarmTarget = id; break;
       case 'confirm-swarm': this.confirmSwarm(); return;
+      case 'confirm-local-swarm': this.confirmLocalSwarm(); return;
       case 'switch-colony': {
         if (!this.session.switchColony(id)) { this.showToast('蜂群切换失败', true); return; }
         this.selectedCell = ''; this.selectedField = ''; this.placing = ''; this.movingCell = '';
@@ -2589,11 +2663,16 @@ export class GameUI {
 
   private confirmSwarm(): void {
     if (this.swarmTarget.length === 0) return;
-    const target = this.engine().w.cfg.regions.find((region) => region.id === this.swarmTarget);
+    const e = this.engine();
+    const target = e.w.cfg.regions.find((region) => region.id === this.swarmTarget);
     if (target === undefined) return;
-    this.requestConfirm(`前往${target.name}`, `新蜂后将带走一半人口和当前资源建立新巢（明星蜂优先跟随）；原蜂群保留另一半及现有建设。新巢成本倍率 ×${costMulFor(this.engine().run.regionIndex + 1, target.difficulty)}。`, '确认分蜂', () => {
-      const points = this.engine().swarmPreview().total;
-      const result = this.engine().swarm(target.id);
+    if (!e.prog.zoneUnlocked(target)) {
+      this.showToast(`去${target.name}要先在${e.w.region().name}有 ${e.prog.zoneColoniesNeeded(target)} 个蜂群：先原地分蜂`, true);
+      return;
+    }
+    this.requestConfirm(`远征${target.name}`, `新蜂后将带走一半人口和当前资源前往${target.name}建立新巢（明星蜂优先跟随），你会跟着她过去；原蜂群保留另一半及现有建设。新巢成本倍率 ×${costMulFor(target.difficulty)}。`, '确认远征', () => {
+      const points = e.swarmPreview(target.id).total;
+      const result = e.swarm(target.id);
       this.feedback(result);
       if (result.ok) {
         this.session.saveNow();
@@ -2601,6 +2680,21 @@ export class GameUI {
         this.swarmTarget = '';
         this.view = 'hive';
         this.closePanel(false);
+      }
+    });
+  }
+
+  private confirmLocalSwarm(): void {
+    const e = this.engine();
+    const local = e.localPreview();
+    if (!local.ready) return;
+    this.requestConfirm('原地分蜂', `新蜂后将带走当前蜂巢一半的人口和资源，在${e.w.region().name}附近建立新蜂群（明星蜂优先跟随）。你继续留在当前蜂群，可以随时在「蜂群切换」里过去。${local.total > 0 ? `本次获得 ${local.total} 传承点。` : ''}`, '确认分蜂', () => {
+      const points = local.total;
+      const result = e.swarmLocal();
+      this.feedback(result);
+      if (result.ok) {
+        this.session.saveNow();
+        if (points > 0 && this.session.ads.remaining(AdPlacement.SwarmBonus) > 0) this.swarmBonus = swarmBonusPoints(points);
       }
     });
   }

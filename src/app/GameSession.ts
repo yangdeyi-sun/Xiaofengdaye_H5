@@ -187,13 +187,13 @@ export class GameSession {
     const engine = this.engine();
     const state = engine.state;
     const active: ColonyChoice = {
-      id: state.activeColonyId, name: `${engine.w.region().name}蜂群`, region: engine.w.region().name,
+      id: state.activeColonyId, name: engine.colonyName(state.activeColonyId, engine.run.regionId), region: engine.w.region().name,
       active: true, bees: engine.w.adults(), honey: formatBig(engine.w.econ.amount(Res.Honey))
     };
     const inactive = state.colonies.map((slot) => {
       const region = DEFAULT_CONFIG.regions.find((item) => item.id === slot.run.regionId)?.name ?? slot.run.regionId;
       const bees = Object.values(slot.run.colony.roles).reduce((sum, value) => sum + Math.max(0, value), 0);
-      return { id: slot.id, name: slot.name, region, active: false, bees, honey: formatBig(slot.run.res[Res.Honey]) };
+      return { id: slot.id, name: state.meta.colonyNames?.[slot.id] ?? slot.name, region, active: false, bees, honey: formatBig(slot.run.res[Res.Honey]) };
     });
     return [active, ...inactive];
   }
@@ -208,7 +208,7 @@ export class GameSession {
     const target = state.colonies[index];
     state.colonies.splice(index, 1);
     state.colonies.push({
-      id: state.activeColonyId, name: `${this.eng.w.region().name}蜂群`, run: state.run, lastActiveAt: now
+      id: state.activeColonyId, name: this.eng.colonyName(state.activeColonyId, state.run.regionId), run: state.run, lastActiveAt: now
     });
     state.activeColonyId = target.id;
     state.run = target.run;
@@ -356,7 +356,8 @@ export class GameSession {
         if (message.kind === 'codex') this.audio.play('codex_new');
         else if (message.kind === 'key') this.audio.play('upgrade_key');
         else if (message.kind === 'special') this.audio.play('talent_keystone');
-        else if (message.kind === 'warn' && message.text.includes('熊抢走')) this.audio.play('threat_lost');
+        else if (message.kind === 'warn' && (message.text.includes('熊抢走') || message.text.includes('上缴'))) this.audio.play('threat_lost');
+        else if (message.kind === 'error' && message.text.includes('熊')) { this.audio.play('threat_lost'); this.audio.vibrate(120); }
         else if (message.kind === 'info' && message.text.includes('交付了')) this.audio.play('bear_honey_pay');
       }
       if (['threat', 'warn', 'milestone', 'rare', 'achievement', 'swarm', 'key', 'season', 'error'].includes(message.kind)) {

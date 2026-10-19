@@ -76,6 +76,7 @@ export class GameEngine {
     this.kingdom.honeyPerSec = hps;
     this.events.honeyPerSec = hps;
     this.kingdom.swarmReady = () => this.prog.swarmPreview().ready;
+    this.kingdom.regionColonies = () => this.prog.regionColonies();
     this.events.busy = () => this.threats.raidActive();
     this.events.publish = (fieldId: string) => this.map.publishDiscovery(fieldId);
     this.w.onHatch = (role: string, count: number, star: boolean) => {
@@ -91,6 +92,7 @@ export class GameEngine {
       if (kind === 'guardWin') this.roster.onGuardWin(ref);
       else this.roster.onScout(kind, index);
     };
+    this.w.onDeath = (role: string, n: number) => this.roster.kill(role, n);
     this.w.starRoll = () => this.roster.rollStar();
     this.w.starBonus = (stat: string) => this.roster.bonus(stat);
     this.prog = new ProgressionService(this.w);
@@ -136,6 +138,11 @@ export class GameEngine {
     this.map.tick(dt);
     this.prod.tick(dt);
     this.threats.tick(dt);
+    if (this.threats.hiveLost.length > 0) {
+      this.threats.hiveLost = '';
+      this.destroyHive();
+      return;
+    }
     this.w.econ.decayOverflow(dt);
     this.w.econ.tick(dt, false);
     s.run.rngState = this.w.rng.state;
@@ -196,6 +203,29 @@ export class GameEngine {
     if (hasFirstBuilding && !this.run.threats.enabled) {
       this.threats.enable();
     }
+  }
+
+  /** 熊掀翻了整个蜂巢：当前蜂群全军覆没，在原地从一座空蜂巢重新开始（永久进度保留）。 */
+  private destroyHive(): void {
+    const old = this.run;
+    const seed = hashSeed(`${this.state.meta.playerId}:bear:${old.regionId}:${old.regionIndex}:${old.time}`);
+    const fresh = createRun(this.w.cfg, old.regionId, old.regionIndex, seed, 0);
+    ALL_RES.forEach((res: string) => { fresh.res[res] = BigNum.zero(); });
+    // 重开的蜂巢仍记得自己领过的传承点，避免重复刷分蜂奖励
+    fresh.stats.legacyPaid = old.stats.legacyPaid ?? 0;
+    fresh.stats.beesLost = (old.stats.beesLost ?? 0) + Object.values(old.colony.roles).reduce((n, v) => n + Math.max(0, v), 0);
+    this.w.s.run = fresh;
+    this.w.rng = new Rng(fresh.rngState);
+    this.hive.reindex();
+    this.w.alloc = [];
+    this.w.fieldEff = {};
+    this.w.refreshFlags();
+    this.hive.recomputeAdjacency();
+    this.w.attrs.recompute();
+    const meta = this.state.meta;
+    meta.hivesLost = (meta.hivesLost ?? 0) + 1;
+    this.w.msg('info', '蜂后在废墟里重新筑巢：先亲手采蜜、酿蜜，再孵化新的蜜蜂。王国等级、传承、图鉴和其它蜂群都还在。');
+    this.saveRequested = true;
   }
 
   /** 蜂巢达到扩建上限却未及时分蜂：当前蜂群坠落，本蜂群从零重建。 */
@@ -423,72 +453,129 @@ export class GameEngine {
     return p;
   }
 
-  swarmPreview(): SwarmPreview {
-    return this.prog.swarmPreview();
+  /** 种区分蜂预览；target 为空时按最容易的种区计算 */
+  swarmPreview(target: string = ''): SwarmPreview {
+    return this.prog.swarmPreview(target);
+  }
+
+  /** 原地分蜂预览 */
+  localPreview(): SwarmPreview {
+    return this.prog.localPreview();
+  }
+
+  /** 蜂群名字：同一种区有多个蜂群时带编号 */
+  colonyName(id: string, regionId: string): string {
+    const saved = this.w.s.meta.colonyNames?.[id];
+    if (saved !== undefined && saved.length > 0) return saved;
+    const region = this.w.cfg.regions.find((r) => r.id === regionId);
+    return `${region === undefined ? regionId : region.name}蜂群`;
+  }
+
+  private nameNewColony(id: string, regionId: string): string {
+    const meta = this.w.s.meta;
+    if (meta.colonyNames === undefined) meta.colonyNames = {};
+    const region = this.w.cfg.regions.find((r) => r.id === regionId);
+    const base = region === undefined ? regionId : region.name;
+    // 新蜂群在本种区的编号：已有的同区蜂群数 + 1（新蜂群此时还没登记）
+    const n = this.prog.regionColonies(regionId);
+    const name = n <= 0 ? `${base}蜂群` : `${base}${n + 1}号蜂群`;
+    meta.colonyNames[id] = name;
+    return name;
   }
 
   /**
-   * 分蜂事务（需求书8.3）：检查 → 快照 → 结算 → 新种区 → 应用天赋 → 保存。
-   * 任一步失败恢复快照，禁止“资源已清除但新种区未建立”。
+   * 原地分蜂：只需要一只新蜂后。新蜂后带走当前蜂巢一半的资源和人口，在本种区附近建立新蜂群；
+   * 玩家继续经营当前蜂群，新蜂群出现在「蜂群切换」里。
+   */
+  swarmLocal(): CmdResult {
+    const preview = this.prog.localPreview();
+    if (!preview.ready) {
+      return CmdResult.fail('PROG_SWARM', '原地分蜂需要一只新蜂后：先从幼虫分化新蜂后');
+    }
+    return this.splitColony(this.run.regionId, 'local', preview.total);
+  }
+
+  /**
+   * 种区分蜂（远征副本）：出发地蜂群数量达到门槛、且蜂群发展条件全部满足后，新蜂后带领一半蜂群前往新种区。
+   * 传入当前种区则按原地分蜂处理。
    */
   swarm(nextRegion: string): CmdResult {
-    const preview = this.prog.swarmPreview();
+    if (nextRegion === this.run.regionId) return this.swarmLocal();
+    const region = this.w.cfg.regions.find((r) => r.id === nextRegion);
+    if (region === undefined) return CmdResult.fail('PROG_REGION', '未知的种区');
+    const preview = this.prog.swarmPreview(nextRegion);
     if (!preview.ready) {
+      const gate = preview.conditions.find((c) => c.id === 'colonies');
+      if (gate !== undefined && !gate.met) {
+        return CmdResult.fail('PROG_SWARM_GATE', `去${region.name}之前，${this.w.region().name}要先有 ${gate.target} 个蜂群（现在 ${gate.current} 个）：先原地分蜂`);
+      }
       return CmdResult.fail('PROG_SWARM', '分蜂条件尚未满足');
     }
+    return this.splitColony(nextRegion, 'zone', preview.total);
+  }
+
+  /**
+   * 分蜂事务（需求书8.3）：检查 → 快照 → 结算 → 新蜂群 → 应用天赋 → 保存。
+   * 任一步失败恢复快照，禁止“资源已清除但新蜂群未建立”。
+   */
+  private splitColony(nextRegion: string, kind: string, points: number): CmdResult {
     const snapshot = cloneState(this.w.s);
-    const snapshotRun = this.w.s.run;
+    const parentRun = this.w.s.run;
     this.onBeforeSwarm(snapshot);
     try {
-      const points = preview.total;
-      this.prog.applySwarmToMeta(points, nextRegion);
       const meta = this.w.s.meta;
+      const parentId = this.w.s.activeColonyId;
+      const parentName = this.colonyName(parentId, parentRun.regionId);
+      if (meta.colonyNames === undefined) meta.colonyNames = {};
+      meta.colonyNames[parentId] = parentName;
+      this.prog.applySwarmToMeta(points, nextRegion, kind);
       // 新蜂后带走一半幼虫、成年蜂和当前库存；旧蜂群保留另一半与原有建设。
       const carriedRes: Record<string, BigNum> = {};
       const carriedOverflow: Record<string, BigNum> = {};
       ALL_RES.forEach((res: string) => {
-        carriedRes[res] = snapshotRun.res[res].mulN(0.5);
-        snapshotRun.res[res] = snapshotRun.res[res].sub(carriedRes[res]).clamp0();
-        carriedOverflow[res] = snapshotRun.overflow[res].mulN(0.5);
-        snapshotRun.overflow[res] = snapshotRun.overflow[res].sub(carriedOverflow[res]).clamp0();
+        carriedRes[res] = parentRun.res[res].mulN(0.5);
+        parentRun.res[res] = parentRun.res[res].sub(carriedRes[res]).clamp0();
+        carriedOverflow[res] = parentRun.overflow[res].mulN(0.5);
+        parentRun.overflow[res] = parentRun.overflow[res].sub(carriedOverflow[res]).clamp0();
       });
       const carriedRoles: Record<string, number> = {};
       const carriedInjured: Record<string, number> = {};
       ALL_ROLES.forEach((role: string) => {
-        carriedRoles[role] = Math.floor(snapshotRun.colony.roles[role] * 0.5);
-        snapshotRun.colony.roles[role] -= carriedRoles[role];
-        carriedInjured[role] = Math.min(carriedRoles[role], Math.floor(snapshotRun.colony.injured[role] * 0.5));
-        snapshotRun.colony.injured[role] -= carriedInjured[role];
+        carriedRoles[role] = Math.floor(parentRun.colony.roles[role] * 0.5);
+        parentRun.colony.roles[role] -= carriedRoles[role];
+        carriedInjured[role] = Math.min(carriedRoles[role], Math.floor(parentRun.colony.injured[role] * 0.5));
+        parentRun.colony.injured[role] -= carriedInjured[role];
       });
       // 名册：明星蜂优先跟随新蜂后，其余按名字隔一只带走一只
-      const rosterSplit = this.roster.split(snapshotRun.colony.roster ?? [], carriedRoles);
-      snapshotRun.colony.roster = rosterSplit.stay;
-      const carriedLarvae = Math.floor(snapshotRun.colony.larvae * 0.5);
-      snapshotRun.colony.larvae -= carriedLarvae;
+      const rosterSplit = this.roster.split(parentRun.colony.roster ?? [], carriedRoles);
+      parentRun.colony.roster = rosterSplit.stay;
+      const carriedLarvae = Math.floor(parentRun.colony.larvae * 0.5);
+      parentRun.colony.larvae -= carriedLarvae;
+      parentRun.colony.plan.larvae = Math.min(parentRun.colony.plan.larvae, parentRun.colony.larvae);
       const carriedBatches: LarvaBatch[] = [];
-      snapshotRun.colony.batches.forEach((batch: LarvaBatch) => {
+      parentRun.colony.batches.forEach((batch: LarvaBatch) => {
         const count = Math.floor(batch.count * 0.5);
         if (count <= 0) return;
         batch.count -= count;
         carriedBatches.push({
           ...batch, batchId: carriedBatches.length + 1, count,
-          startAt: Math.max(0, batch.startAt - snapshotRun.time),
-          finishAt: Math.max(0, batch.finishAt - snapshotRun.time)
+          startAt: Math.max(0, batch.startAt - parentRun.time),
+          finishAt: Math.max(0, batch.finishAt - parentRun.time)
         });
       });
-      snapshotRun.colony.youngQueens = Math.max(0, snapshotRun.colony.youngQueens - 1);
-      this.w.s.colonies.push({
-        id: this.w.s.activeColonyId,
-        name: `${this.w.region().name}蜂群`,
-        run: snapshotRun,
-        lastActiveAt: Date.now()
-      });
-      this.w.s.activeColonyId = `colony-${meta.swarmCount}`;
+      parentRun.colony.batches = parentRun.colony.batches.filter((batch: LarvaBatch) => batch.count > 0);
+      parentRun.colony.youngQueens = Math.max(0, parentRun.colony.youngQueens - 1);
+      // 分蜂给原蜂巢减了压：如果已经扩建到上限，重新计算承重期限
+      parentRun.hive.fullAt = 0;
+      parentRun.hive.fallAt = 0;
+      const newId = `colony-${meta.swarmCount}`;
       this.w.refreshFlags();
       this.w.attrs.recompute();
-      const startLarvae = Math.floor(this.w.attrs.get('start.larvae'));
+      // “随行幼虫”天赋只在远征新种区时生效
+      const startLarvae = kind === 'zone' ? Math.floor(this.w.attrs.get('start.larvae')) : 0;
       const seed = hashSeed(`${meta.playerId}:${meta.swarmCount}:${nextRegion}`);
-      const run = createRun(this.w.cfg, nextRegion, snapshotRun.regionIndex + 1, seed, startLarvae);
+      const generation = kind === 'zone' ? parentRun.regionIndex + 1 : parentRun.regionIndex;
+      const run = createRun(this.w.cfg, nextRegion, generation, seed, startLarvae);
       ALL_RES.forEach((res: string) => {
         run.res[res] = carriedRes[res];
         run.overflow[res] = carriedOverflow[res];
@@ -503,24 +590,41 @@ export class GameEngine {
       run.colony.nextBatchId = carriedBatches.length + 1;
       run.colony.hatched = Object.values(carriedRoles).reduce((sum, value) => sum + value, 0);
       run.stats.peakPop = run.colony.hatched;
-      this.w.s.run = run;
-      this.w.rng = new Rng(run.rngState);
-      this.hive.reindex();
-      this.w.alloc = [];
-      this.w.fieldEff = {};
-      this.w.refreshFlags();
-      this.hive.recomputeAdjacency();
-      this.w.attrs.recompute();
-      this.w.gainXp(100);
-      this.w.msg('swarm', `分蜂完成！新蜂后带领一半蜂群和资源抵达${this.w.region().name}，获得 ${points} 传承点（全巢产量永久 +${points * 2}%）。新巢成本倍率 ×${this.hive.constructionCostMul()}。`);
-      this.w.emit('swarm', 0, 0, this.w.region().name, 'any');
+      const newName = this.nameNewColony(newId, nextRegion);
+      const now = Date.now();
+      const legacy = `获得 ${points} 传承点（全巢产量永久 +${points * 2}%）`;
+      if (kind === 'local') {
+        // 原地分蜂：玩家留在原蜂群，新蜂群离开期间按离线规则自己经营
+        this.w.s.colonies.push({ id: newId, name: newName, run: run, lastActiveAt: now });
+        this.hive.recomputeAdjacency();
+        this.w.attrs.recompute();
+        this.w.gainXp(40);
+        this.w.msg('swarm', `原地分蜂完成！新蜂后带着一半蜂群和资源在附近建立了「${newName}」。${this.w.region().name}现在有 ${this.prog.regionColonies()} 个蜂群${points > 0 ? `，${legacy}` : ''}。可以在「蜂群切换」里随时过去经营。`);
+        this.w.emit('swarm', 0, 0, newName, 'any');
+      } else {
+        this.w.s.colonies.push({ id: parentId, name: parentName, run: parentRun, lastActiveAt: now });
+        this.w.s.activeColonyId = newId;
+        this.w.s.run = run;
+        this.w.rng = new Rng(run.rngState);
+        this.hive.reindex();
+        this.w.alloc = [];
+        this.w.fieldEff = {};
+        this.w.refreshFlags();
+        this.hive.recomputeAdjacency();
+        this.w.attrs.recompute();
+        this.w.gainXp(100);
+        this.w.msg('swarm', `种区分蜂完成！新蜂后带领一半蜂群和资源抵达${this.w.region().name}，${legacy}。新巢成本倍率 ×${this.hive.constructionCostMul()}。`);
+        this.w.emit('swarm', 0, 0, this.w.region().name, 'any');
+      }
       this.saveRequested = true;
-      return CmdResult.ok(`获得 ${points} 传承点`);
+      return CmdResult.ok(points > 0 ? `获得 ${points} 传承点` : (kind === 'local' ? '原地分蜂完成' : '分蜂完成'));
     } catch (e) {
       // 回滚：恢复分蜂前状态
       const restored = cloneState(snapshot);
       this.w.s.meta = restored.meta;
       this.w.s.run = restored.run;
+      this.w.s.colonies = restored.colonies;
+      this.w.s.activeColonyId = restored.activeColonyId;
       this.w.rng = new Rng(restored.run.rngState);
       this.hive.reindex();
       this.w.refreshFlags();

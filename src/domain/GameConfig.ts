@@ -397,7 +397,7 @@ const TUTORIAL: TutorialStepDef[] = [
 ];
 
 export const DEFAULT_CONFIG: GameConfigDef = {
-  configVersion: '0.1.0-cfg11',
+  configVersion: '0.1.0-cfg12',
   schemaVersion: 3,
   economy: {
     manualYield: 2,
@@ -468,10 +468,12 @@ export const DEFAULT_CONFIG: GameConfigDef = {
     minPollinations: 0,
     basePoints: 5,
     resourceBonusCap: 0.2,
-    queenHoney: 1000,
-    queenWax: 250,
-    queenJelly: 5,
-    queenSuccessChance: 0.25
+    // 2026-10-19 新规则：产卵后选择分化新蜂后，消耗 1 只幼虫 + 10 蜂王浆；25% 起，每失败一次 +2%，失败返还一半
+    queenJelly: 10,
+    queenSuccessChance: 0.25,
+    queenFailStep: 0.02,
+    queenMaxWaiting: 3,
+    zoneMinColonies: 2
   }
 };
 
@@ -525,8 +527,8 @@ export function validateConfig(cfg: GameConfigDef): string[] {
   if (cfg.regions.length === 0) {
     errs.push('no regions');
   }
-  if (cfg.swarm.queenHoney <= 0 || cfg.swarm.queenWax <= 0 || cfg.swarm.queenJelly <= 0 ||
-    cfg.swarm.queenSuccessChance <= 0 || cfg.swarm.queenSuccessChance > 1) {
+  if (cfg.swarm.queenJelly <= 0 || cfg.swarm.queenFailStep < 0 || cfg.swarm.queenMaxWaiting < 1 ||
+    cfg.swarm.queenSuccessChance <= 0 || cfg.swarm.queenSuccessChance > 1 || cfg.swarm.zoneMinColonies < 1) {
     errs.push('swarm queen settings invalid');
   }
   return errs;

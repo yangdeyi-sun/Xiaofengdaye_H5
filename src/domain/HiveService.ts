@@ -35,10 +35,13 @@ export function buildHive(maxRing: number): HiveState {
   return hive;
 }
 
-/** 第 gen 代、难度 difficulty 的种区：建造、扩建、升级与研究成本倍率 */
-export function costMulFor(gen: number, difficulty: number): number {
-  const g = Math.max(0, Math.min(60, gen));
-  return Math.round((1 + 0.6 * g) * (1 + 0.35 * Math.max(0, difficulty)) * 100) / 100;
+/**
+ * 种区难度 difficulty 的蜂巢：建造、扩建、升级与研究成本倍率。
+ * 2026-10-19：不再按代数翻倍，只跟种区难度挂钩（草甸 ×1、湿地 ×1.4、高寒/荒原 ×1.8、屋顶 ×2.2），
+ * 让传承加成真正体现为“第二代开局明显更快”。
+ */
+export function costMulFor(difficulty: number): number {
+  return Math.round((1 + 0.4 * Math.max(0, difficulty)) * 100) / 100;
 }
 
 export class HiveService {
@@ -97,7 +100,7 @@ export class HiveService {
 
   /** 新巢建设成本倍率：随代数缓慢上升，并按种区难度加价（难的种区传承点也更多） */
   constructionCostMul(): number {
-    return costMulFor(this.w.s.run.regionIndex, this.w.region().difficulty);
+    return costMulFor(this.w.region().difficulty);
   }
 
   isAtCapacity(): boolean {

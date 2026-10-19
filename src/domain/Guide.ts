@@ -101,8 +101,8 @@ export const INTRO_TOPICS: IntroTopic[] = [
     '蜂后轻轻落在你面前，把整座蜂巢托付给你。\n从今天起，每一只幼虫的未来、每一滴蜂蜜的去处、每一片花田的得失，都由你来决定。\n花会谢，冬会来，敌害也在暗处窥伺——它们能否熬过寒冬、开枝散叶，全看你了。',
     '“我会守护好这个蜂巢。”',
     'xf_nav_queen', '', '', (e: GameEngine) => e.state.meta.tutorialDone),
-  new IntroTopic('colonySwitch', '两个蜂群都在继续经营',
-    '分蜂不会清除原蜂群；原群保留现有建设和一半人口资源，新蜂后带走另一半建立新巢。',
+  new IntroTopic('colonySwitch', '每个蜂群都在继续经营',
+    '分蜂不会清除原蜂群；原群保留现有建设和一半人口资源，新蜂后带走另一半建立新巢。原地分蜂后你留在原蜂群，远征种区后你跟着新蜂后走。',
     '打开侧边栏的“蜂群切换”，可以随时回到原蜂群；切换时会自动结算它离开期间的经营收益。',
     'xf_nav_swarm', 'panel:colonies', '', (e: GameEngine) => e.state.meta.swarmCount > 0 && e.state.colonies.length > 0),
   new IntroTopic('flowerRecovery', '花丛也需要休息', '每片花丛的花蜜有限，采空后会暂时停止供应。',
@@ -161,17 +161,17 @@ export const INTRO_TOPICS: IntroTopic[] = [
   new IntroTopic('house', '巢内工蜂', '系着围裙的巢内工匠。',
     '右侧功能栏「蜂群」里可以分配酿蜜和筑巢（产蜂蜡）的比例。', 'xf_role_house', '', '',
     (e: GameEngine) => e.w.role(Role.House) > 0),
-  new IntroTopic('threats', '敌害', '胡蜂、蜘蛛网和蜡螟会不时出现，它们只会让蜜蜂受伤或停工，不会毁掉蜂巢。',
-    '直接点敌害就能亲手驱赶（按住连续拍打），守卫蜂也会自动出击。击退能拿到蜂蜜，蜂巢越大奖励越多；连续击退 5 次再送 1 蜂王浆。', 'xf_threat_danger', '', '',
+  new IntroTopic('threats', '敌害', '胡蜂、蜘蛛网和蜡螟会不时出现。新手阶段它们只会让蜜蜂受伤；新手结束后会咬死蜜蜂，而且每个四季轮回都更强。',
+    '直接点敌害就能亲手驱赶（按住连续拍打），守卫蜂也会自动出击；守卫越多、攻击效率越高，伤亡越少。击退能拿到蜂蜜，连续击退 5 次再送 1 蜂王浆。', 'xf_threat_danger', '', '',
     (e: GameEngine) => e.run.threats.enabled),
-  new IntroTopic('wasp', '胡蜂', '在航线附近盘旋的掠食者。', '会降低那片花田的采集效率并弄伤采集蜂；点胡蜂亲手驱赶，守卫蜂也会赶来帮忙。',
+  new IntroTopic('wasp', '胡蜂', '在航线附近盘旋的掠食者。', '会降低那片花田的采集效率，弄伤甚至咬死采集蜂；点胡蜂亲手驱赶，守卫蜂也会赶来帮忙。',
     'xf_enemy_wasp', '', 'field', (e: GameEngine) => hasThreat(e, ThreatType.Wasp)),
-  new IntroTopic('web', '蜘蛛网', '结在花田上的网。', '被网住的花田效率大降；点蛛网亲手清理，守卫蜂也会去清理。', 'xf_enemy_web', '',
+  new IntroTopic('web', '蜘蛛网', '结在花田上的网。', '被网住的花田效率大降，撞进网里的采集蜂可能会死；点蛛网亲手清理，守卫蜂也会去清理。', 'xf_enemy_web', '',
     'field', (e: GameEngine) => hasThreat(e, ThreatType.Web)),
-  new IntroTopic('moth', '蜡螟', '偷偷钻进蜂巢的小虫。', '会啃食蜂蜡；进蜂巢点储蜜格上的蜡螟赶走它，守卫蜂在巢门值守时也能更快赶走它。', 'xf_enemy_moth', '',
+  new IntroTopic('moth', '蜡螟', '偷偷钻进蜂巢的小虫。', '会啃食蜂蜡、毁掉幼虫；进蜂巢点储蜜格上的蜡螟赶走它，守卫蜂在巢门值守时也能更快赶走它。', 'xf_enemy_moth', '',
     'hive', (e: GameEngine) => hasThreat(e, ThreatType.Moth)),
-  new IntroTopic('bear', '熊', '闻着蜜香而来的大家伙，出现得很少。',
-    '可以集结守卫防守、交付一些蜂蜜让它离开，或者稍后再处理；蜂巢不会被毁。', 'xf_enemy_bear', '', 'field',
+  new IntroTopic('bear', '熊', '闻着蜜香而来的大家伙：建成采集蜂巢房以后，它随时可能出现（冬天冬眠）。',
+    '点熊拍打、让守卫蜂迎战，把它赶走能拿到蜂王浆。赶不走的话，25% 会把整个蜂巢掀翻（这个蜂群从零开始），其余时候蜜蜂只好上缴蜂蜜。', 'xf_enemy_bear', '', 'field',
     (e: GameEngine) => hasThreat(e, ThreatType.Bear)),
   new IntroTopic('guardRoom', '守卫巢房', '守卫蜂的营房。', '建成后可以培养守卫蜂，保护花田、航线和巢门。',
     'xf_building_guard', 'hive', 'hive', (e: GameEngine) => available(e, Bld.GuardRoom)),
@@ -201,14 +201,14 @@ export const INTRO_TOPICS: IntroTopic[] = [
   new IntroTopic('kingdom', '王国等级', '你经营蜂巢的每件事都会积累王国经验：孵化、升级、建造、击退敌害、发现花田、过冬、完成目标……',
     '顶部的 Lv 小标显示等级和进度。每升一级都有奖励，部分等级送明星蜂卵和新外观，每 10 级全部研究上限 +1。', 'xf_building_queen', 'panel:tasks', '',
     (e: GameEngine) => e.state.meta.tutorialDone && e.kingdom.state().level >= 2),
-  new IntroTopic('chapter', '种区篇章', '每个种区都有一串按顺序推进的篇章目标，一共 10 个，最后一个就是分蜂。',
+  new IntroTopic('chapter', '种区篇章', '每个种区都有一串按顺序推进的篇章目标，一共 10 个：分化新蜂后、原地分蜂开枝散叶，最后一个就是远征新种区。',
     '在「任务」最上面能看到当前篇章和进度，完成就自动发奖。每个种区还有一个专属成就和蜂巢外观。', 'xf_nav_split', 'panel:tasks', '',
     (e: GameEngine) => e.state.meta.tutorialDone && e.w.unlocked('t_first_expand')),
-  new IntroTopic('seasonEvent', '季节事件', '春、夏、秋开头会发生一件小事：流浪蜂群、远处花海、暴雨、养蜂人……',
-    '点顶部的事件条做选择，选完立刻见效。不想选也没关系，季节结束前它会自然过去。', 'xf_card_season', '', '',
+  new IntroTopic('seasonEvent', '季节事件', '每个季节开头会发生一件小事：流浪蜂群、远处花海、暴雨、养蜂人、寒潮……',
+    '空闲时会自动弹出，选完立刻见效；点「稍后再说」可以先放着，顶部事件条还能再点开。季节结束前不选，它会自然过去。', 'xf_card_season', '', '',
     (e: GameEngine) => e.events.active() !== null),
   new IntroTopic('raid', '蜂巢保卫战', '秋天，胡蜂窝派来一波又一波胡蜂，最后胡蜂王会亲自出马。',
-    '点顶部的保卫战条跳到战场，直接点胡蜂拍打（按住连拍），守卫蜂也会出击。3 分钟内全部打跑就能拿到蜂王浆和大量蜂蜜。', 'xf_enemy_wasp', '', 'field',
+    '点顶部的保卫战条跳到战场，直接点胡蜂拍打（按住连拍），守卫蜂也会出击。前两个秋天 3 波、之后 4 波，限时内全部打跑就能拿到蜂王浆和大量蜂蜜。', 'xf_enemy_wasp', '', 'field',
     (e: GameEngine) => e.threats.raidActive()),
   new IntroTopic('star', '明星蜂', '偶尔会孵出带特殊才能的明星蜂，它会给整个蜂群加成。',
     '在蜂群名册或图鉴「明星蜂」里能看到它，用蜂王浆升级最高到 Lv5。明星蜂分蜂时优先跟随新蜂后，一代代攒下来。', 'xf_status_rare', 'panel:roster', '',
@@ -216,8 +216,8 @@ export const INTRO_TOPICS: IntroTopic[] = [
   new IntroTopic('evolution', '进化腔', '研究本种区专属强化的地方。',
     '建成后可以用蜂蜜和蜂王浆进行研究；研究只在本种区有效。', 'xf_building_evolution', 'hive', 'hive',
     (e: GameEngine) => available(e, Bld.Evolution)),
-  new IntroTopic('swarm', '分蜂', '先投入育王资源，以25%成功率分化出一只新蜂后。',
-    '失败会返还一半资源，且下次成功率更高（最多 4 次必成）。达成其余条件后，新蜂后带走一半人口和资源建立新巢；每个传承点让之后所有蜂巢产量永久 +2%。', 'xf_nav_split', '', '',
+  new IntroTopic('swarm', '分蜂', '攒够 10 蜂王浆，孵一枚新卵，就能把幼虫分化成新蜂后：成功率 25%，每失败一次 +2%，失败返还一半蜂王浆。',
+    '有了新蜂后就能原地分蜂：她带走一半资源和人口在附近建新巢。本种区蜂群够多（最少 2 个，难度越高越多）并达成发展条件后，才能远征新的种区。每个传承点让之后所有蜂巢产量永久 +2%。', 'xf_nav_split', '', '',
     (e: GameEngine) => e.w.unlocked('t_survive_winter'))
 ];
 
@@ -329,7 +329,7 @@ export class Guide {
     // 注意
     const bear = e.threats.pendingBear();
     if (bear !== null && bear.phase !== 'postponed') {
-      add(new Hint('bear', '熊来了！选择防守、交付蜂蜜或稍后处理', 'warn', 'panel:eco', 'xf_enemy_bear'));
+      add(new Hint('bear', '熊来了！点熊拍打、让守卫迎战，赶不走可能整个蜂巢都会被掀翻', 'warn', 'panel:eco', 'xf_enemy_bear'));
     }
     if (e.run.season.starving) {
       add(new Hint('starving', '储蜜不足，蜂群效率减半：多采集或减少筑巢', 'warn', 'panel:resources', 'xf_status_insufficient'));
@@ -355,10 +355,12 @@ export class Guide {
       add(new Hint(`intro_${topic.id}`, `新事物：${topic.title}`, 'new', `intro:${topic.id}`, topic.icon));
     }
     if (e.swarmPreview().ready) {
-      add(new Hint('swarm', '分蜂条件已达成，可以前往新的种区', 'new', 'panel:swarm', 'xf_nav_split'));
-    } else if (e.w.unlocked('t_survive_winter') && e.run.colony.youngQueens <= 0 &&
-      e.w.econ.canAfford(e.colony.queenCost())) {
-      add(new Hint('rearQueen', '育王资源已备齐，可以尝试分化新蜂后', 'try', 'panel:swarm', 'xf_building_queen'));
+      add(new Hint('swarm', '种区分蜂条件已达成，可以远征新的种区', 'new', 'panel:swarm', 'xf_nav_split'));
+    } else if (e.run.colony.youngQueens > 0) {
+      add(new Hint('localSwarm', '新蜂后已就位：可以原地分蜂，带走一半资源和人口建新巢', 'new', 'panel:swarm', 'xf_nav_split'));
+    } else if (e.w.unlocked('t_survive_winter') && e.w.econ.canAfford(e.colony.queenCost())) {
+      add(new Hint('rearQueen', e.run.colony.larvae > 0 ? '蜂王浆够 10 了：可以把幼虫分化成新蜂后' : '蜂王浆够 10 了：孵一枚新卵，就能分化新蜂后',
+        'try', 'panel:swarm', 'xf_building_queen'));
     }
     if (e.daily.canSign()) {
       add(new Hint('dailySign', `今日签到：领取第 ${e.daily.nextStreak()} 天奖励`, 'new', 'panel:tasks', 'xf_card_updated'));

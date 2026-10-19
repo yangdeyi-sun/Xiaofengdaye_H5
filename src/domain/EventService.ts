@@ -5,8 +5,8 @@ import { ALL_ROLES, Reason, Res, Role, SeasonId } from './Types';
 import { CmdResult, CostAmount, World } from './World';
 
 /**
- * 季节事件：每个春、夏、秋开头出现一个二选一/三选一的小事件，选完当场见效。
- * 不弹窗打断：顶部出现一个可点的事件条，玩家方便时再选；季节结束前没选就自然过去。
+ * 季节事件：每个春、夏、秋、冬开头出现一个二选一/三选一的小事件，选完当场见效。
+ * 界面在玩家空闲时自动弹出一次；点“稍后再说”后顶部保留事件条，季节结束前没选就自然过去。
  */
 
 export class EventOption {
@@ -48,7 +48,9 @@ const EVENTS: EventDef[] = [
   { id: 'pollen', title: '花粉丰年', icon: 'xf_talent_e_pollen', seasons: [SeasonId.Spring, SeasonId.Summer] },
   { id: 'cub', title: '迷路的小熊崽', icon: 'xf_enemy_bear', seasons: [SeasonId.Spring, SeasonId.Summer, SeasonId.Autumn] },
   { id: 'wish', title: '蜂后的心愿', icon: 'xf_nav_queen', seasons: [SeasonId.Spring, SeasonId.Summer, SeasonId.Autumn] },
-  { id: 'dance', title: '摇摆舞大会', icon: 'xf_role_scout', seasons: [SeasonId.Summer, SeasonId.Autumn] }
+  { id: 'dance', title: '摇摆舞大会', icon: 'xf_role_scout', seasons: [SeasonId.Summer, SeasonId.Autumn] },
+  { id: 'cold', title: '寒潮来袭', icon: 'xf_season_winter', seasons: [SeasonId.Winter] },
+  { id: 'sunny', title: '冬日暖阳', icon: 'xf_season_winter_prep', seasons: [SeasonId.Winter] }
 ];
 
 export class EventService {
@@ -86,6 +88,7 @@ export class EventService {
     if (id === 'cub') return w.adults() >= 20;
     if (id === 'dance') return w.role(Role.Scout) > 0 && this.hiddenField() !== null;
     if (id === 'trader') return w.unlocked('t_build_storage');
+    if (id === 'sunny') return w.role(Role.Forager) >= 2;
     return true;
   }
 
@@ -146,7 +149,10 @@ export class EventService {
       if (p.res === Res.Honey) this.w.econ.addN(Res.Honey, p.amount, Reason.Task, p.kind);
       else this.w.econ.add(p.res, BigNum.of(p.amount), Reason.Task, p.kind);
     }
-    if (p.kind === 'cub') this.w.s.run.threats.nextBearAt += 1800;
+    if (p.kind === 'cub') {
+      const th = this.w.s.run.threats;
+      th.nextBearAt = Math.max(th.nextBearAt, this.w.s.run.time) + 1800;
+    }
     this.w.msg(p.kind === 'cub' || p.amount >= 1 ? 'milestone' : 'info', p.text);
   }
 
@@ -234,6 +240,20 @@ export class EventService {
       case 'wish':
         v.text = `蜂后想尝尝刚采的鲜花蜜：90 秒内亲手采蜜 30 次，她会奖励你 2 蜂王浆和约 ${Math.round(Math.max(60, h * 30))} 蜂蜜。`;
         v.options = [new EventOption('accept', '接受挑战', '开始计时 90 秒'), new EventOption('later', '下次吧', '')];
+        break;
+      case 'cold': {
+        const cost = this.coldCost();
+        v.text = '一股寒潮压了过来，巢里越来越冷。蜜蜂们可以抱成一团取暖，但要多吃一点蜂蜜热身。';
+        v.options = [new EventOption('huddle', `抱团取暖（${cost} 蜂蜜）`, '本季剩下的时间越冬消耗 -20%'),
+          new EventOption('endure', '硬扛过去', '不花蜂蜜，但接下来 2 分钟越冬消耗 +50%'),
+          new EventOption('adwarm', '邻巢送来暖巢草', '不花蜂蜜，本季越冬消耗 -20%', true)];
+        break;
+      }
+      case 'sunny':
+        v.text = '难得的冬日暖阳！花田里冒出了几朵冬花，巢里也暖和了起来。';
+        v.options = [new EventOption('forage', '趁暖出去采蜜', '1 分钟内采集速度 ×3'),
+          new EventOption('rest', '让蜂群晒太阳休养', '受伤的蜜蜂全部痊愈'),
+          new EventOption('adboth', '两个都要', '出去采蜜，受伤的也全部痊愈', true)];
         break;
       case 'dance':
         v.text = '侦察蜂们要开一场摇摆舞大会！';
@@ -358,6 +378,29 @@ export class EventService {
         msg = '小熊崽吃得很开心，在巢边打起了瞌睡';
         break;
       }
+      case 'cold:huddle':
+      case 'cold:adwarm': {
+        const cost = this.coldCost();
+        if (option === 'huddle' && !w.econ.spend([new CostAmount(Res.Honey, BigNum.of(cost))], Reason.Winter, 'cold')) {
+          return CmdResult.fail('ECON_SHORT', `需要 ${cost} 蜂蜜`);
+        }
+        const sec = Math.max(30, w.s.run.season.endsAt - w.s.run.time);
+        this.effect('cold', '抱团取暖', 'storage.winterLoss', 0.8, sec);
+        msg = '蜜蜂们抱成一团，巢里暖和多了：本季越冬消耗 -20%';
+        break;
+      }
+      case 'cold:endure':
+        this.effect('cold', '寒潮', 'storage.winterLoss', 1.5, 120);
+        msg = '寒潮里硬扛着：接下来 2 分钟越冬消耗 +50%';
+        break;
+      case 'sunny:forage':
+      case 'sunny:rest':
+      case 'sunny:adboth':
+        if (option !== 'rest') this.effect('sunny', '冬日暖阳', 'forager.collect', 3, 60);
+        if (option !== 'forage') ALL_ROLES.forEach((r: string) => { w.s.run.colony.injured[r] = 0; });
+        msg = option === 'forage' ? '采集蜂趁着暖阳出发了：1 分钟内采集速度 ×3'
+          : (option === 'rest' ? '晒过太阳，受伤的蜜蜂全都恢复了' : '采集蜂出去采蜜，受伤的蜜蜂也全都恢复了');
+        break;
       case 'wish:accept':
         w.s.run.season.challenge = {
           kind: 'wish', until: w.s.run.time + 90, start: w.s.run.stats.manualCollects, target: 30,
@@ -390,6 +433,11 @@ export class EventService {
     w.gainXp(6);
     w.attrs.recompute();
     return CmdResult.ok(msg);
+  }
+
+  /** 寒潮抱团取暖要多吃的蜂蜜：约 4% 储备，至少 20 */
+  private coldCost(): number {
+    return Math.round(Math.max(20, this.w.econ.num(Res.Honey) * 0.04));
   }
 
   /** 季节没选就过去了 */

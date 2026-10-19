@@ -64,10 +64,19 @@ let evCount = 0;
 let lastRaid = '';
 const raidLog: string[] = [];
 let carriedAtSwarm = 0;
+const swatBears = ((globalThis as unknown as { process?: { env: Record<string, string | undefined> } }).process?.env.SIM_SWAT ?? '1') !== '0';
+let beesLostTotal = 0;
+let lastLost = 0;
+let queens = 0;
+let localSwarms = 0;
+let bearsSeen = 0;
+let lastBear = '';
 const kLog: string[] = [];
 
+let prevRun = eng.run;
 while (eng.run.time < maxT) {
   eng.step(0.1);
+  if (eng.run !== prevRun) { prevRun = eng.run; lastLost = eng.run.stats.beesLost ?? 0; }
   const t = eng.run.time;
   const fr = w.role(Role.Forager);
   // 手动点击：开局 2 次/秒，采集蜂多了就停止（自动化后手动需求下降）
@@ -79,6 +88,14 @@ while (eng.run.time < maxT) {
       clickAcc -= 1;
     }
   }
+  // 在场的玩家看到熊会去拍它（约每秒 3 下）；SIM_SWAT=0 模拟完全不管的挂机玩家
+  if (swatBears && Math.round(t * 10) % 3 === 0) {
+    const b = eng.threats.pendingBear();
+    if (b !== null && b.phase === 'active') eng.swatThreat(b.eventId);
+  }
+  const lostNow = eng.run.stats.beesLost ?? 0;
+  if (lostNow > lastLost) beesLostTotal += lostNow - lastLost;
+  lastLost = lostNow;
   if (Math.round(t * 10) % 10 !== 0) continue; // 以下决策每秒一次
   sec++;
 
@@ -139,8 +156,12 @@ while (eng.run.time < maxT) {
       if (h < bestCost && h < w.econ.num(Res.Honey) * 0.5) { bestCost = h; best = tr.id; }
     }
     if (best) eng.upgrade(best);
-    for (const r of w.cfg.research) {
-      if (eng.research(r.id).ok) break;
+    // 蜂王浆优先留给新蜂后（10 个一次）：已有新蜂后或蜂王浆富余时才做研究
+    const saveJelly = w.unlocked('t_survive_winter') && eng.run.colony.youngQueens === 0;
+    if (!saveJelly || w.econ.num(Res.Jelly) >= eng.w.cfg.swarm.queenJelly + 4) {
+      for (const r of w.cfg.research) {
+        if (eng.research(r.id).ok) break;
+      }
     }
   }
   // 授粉
@@ -149,15 +170,22 @@ while (eng.run.time < maxT) {
     eng.setPollinators(f.fieldId, 3);
     pollinated = true;
   }
-  // 熊：防守
+  // 熊：迎战（机器人不会亲手拍打，只靠守卫）
   const bear = eng.threats.pendingBear();
   if (bear && bear.phase === 'warning') eng.bearChoice(bear.eventId, 'defend');
-  // 新蜂后：其余分蜂条件（除资源外）都满足时开始培育（有保底，最多 4 次）
-  const pre = eng.swarmPreview();
-  if (eng.run.colony.youngQueens === 0 && w.unlocked('t_survive_winter') &&
-    pre.conditions.filter((c) => c.id !== 'queen' && c.id !== 'honey' && c.id !== 'jelly').every((c) => c.met) &&
-    w.econ.canAfford(eng.colony.queenCost())) {
-    eng.differentiateQueen();
+  // 新蜂后：度过第一个冬天后，攒够 10 蜂王浆就孵一枚卵去分化（25% 起每败 +2%，失败返还一半）
+  if (eng.run.colony.youngQueens === 0 && w.unlocked('t_survive_winter') && w.econ.canAfford(eng.colony.queenCost())) {
+    if (eng.run.colony.larvae < 1) eng.lay();
+    if (eng.differentiateQueen().ok) mark(`queen_${++queens}`);
+  }
+  // 原地分蜂：本种区蜂群不够去最容易的种区时，有新蜂后就原地分一次
+  const gate = eng.swarmPreview().conditions.find((c) => c.id === 'colonies');
+  // SIM_LOCAL=late：等蜂群壮大到远征人口门槛后再原地分蜂（更像会规划的玩家）
+  const localLate = ((globalThis as unknown as { process?: { env: Record<string, string | undefined> } }).process?.env.SIM_LOCAL ?? '') === 'late';
+  const popGate = eng.swarmPreview().conditions.find((c) => c.id === 'pop');
+  const readyToSplit = localLate ? (popGate !== undefined && w.adults() >= popGate.target * 1.6) : w.adults() >= 24;
+  if (eng.run.colony.youngQueens > 0 && gate !== undefined && !gate.met && readyToSplit) {
+    if (eng.swarmLocal().ok) { localSwarms++; mark(`local_swarm_${localSwarms}`); }
   }
   // 季节事件：选第一个不需要广告的选项
   const ev = eng.events.view();
@@ -177,10 +205,13 @@ while (eng.run.time < maxT) {
   if (sec % 1800 === 0) {
     kLog.push(`${fmt(t)} 王国Lv${eng.kingdom.state().level} 明星蜂${eng.roster.stars().length} 名册${eng.roster.list().length}/${w.adults()} 篇章${eng.kingdom.chapter().index}/${eng.kingdom.chapter().total} 保卫战胜${eng.state.meta.raidWins ?? 0}`);
   }
-  // 分蜂
-  const pv = eng.swarmPreview();
-  if (pv.ready) {
-    const r = eng.swarm(swarmed === 0 ? 'alpine' : 'meadow');
+  const bearNow = eng.threats.pendingBear();
+  if (bearNow !== null && bearNow.eventId !== lastBear) { lastBear = bearNow.eventId; bearsSeen++; }
+  // 种区分蜂：去当前种区之外、门槛已满足的最容易的种区
+  const target = eng.prog.zoneTargets().filter((r) => eng.prog.zoneUnlocked(r)).sort((a, b) => a.difficulty - b.difficulty)[0];
+  const pv = eng.swarmPreview(target?.id ?? '');
+  if (pv.ready && target !== undefined) {
+    const r = eng.swarm(target.id);
     if (r.ok) {
       swarmed++;
       carriedAtSwarm = w.population();
@@ -210,6 +241,8 @@ raidLog.slice(0, 12).forEach((line) => console.log(`  ${line}`));
 console.log('\n长期循环');
 kLog.forEach((line) => console.log(`  ${line}`));
 console.log(`  季节事件 ${evCount} 次 · 保卫战 ${eng.state.meta.raidWins ?? 0} 胜 · 王国 Lv${eng.kingdom.state().level} · 传承点 ${eng.state.meta.inheritance.totalPoints}`);
+console.log(`  分蜂记录 ${eng.state.meta.history.map((h) => `${h.regionId}->${h.toRegion}(${h.kind},${h.points},${Math.round(h.playTime / 60)}m)`).join(' ')}`);
+console.log(`  新蜂后 ${queens} 只 · 原地分蜂 ${localSwarms} 次 · 种区分蜂 ${swarmed} 次 · 熊 ${bearsSeen} 次 · 被熊毁巢 ${eng.state.meta.hivesLost ?? 0} 次 · 被敌害咬死共 ${beesLostTotal} 只`);
 // ---------- 验收 ----------
 interface Check { name: string; key: string; min: number; max: number; }
 const checks: Check[] = [
@@ -224,7 +257,8 @@ const checks: Check[] = [
   { name: '第一次扩建 ≤15分钟', key: 'first_expand', min: 0, max: 900 },
   { name: '首个冬季在20分钟后', key: 'first_winter_start', min: 1200, max: 1e9 },
   { name: '度过冬季', key: 'survived_winter', min: 0, max: 1e9 },
-  { name: '完成首次分蜂', key: 'swarm_1', min: 0, max: 1e9 },
+  { name: '完成首次原地分蜂', key: 'local_swarm_1', min: 0, max: 1e9 },
+  { name: '完成首次种区分蜂', key: 'swarm_1', min: 0, max: 1e9 },
 ];
 let fail = 0;
 console.log('\n里程碑（游戏时间）');

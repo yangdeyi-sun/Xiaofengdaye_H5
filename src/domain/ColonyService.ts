@@ -42,32 +42,43 @@ export class ColonyService {
     return this.w.econ.costOf(def.costs, this.w.role(role) + queued, this.w.attrs.get('nursery.costMul'), 20);
   }
 
+  /** 分化一只新蜂后的资源：1 只幼虫另算，这里只列蜂王浆 */
   queenCost(): CostAmount[] {
-    const sc = this.w.cfg.swarm;
-    return [
-      new CostAmount(Res.Honey, BigNum.of(sc.queenHoney)),
-      new CostAmount(Res.Wax, BigNum.of(sc.queenWax)),
-      new CostAmount(Res.Jelly, BigNum.of(sc.queenJelly))
-    ];
+    return [new CostAmount(Res.Jelly, BigNum.of(this.w.cfg.swarm.queenJelly))];
   }
 
-  /** 新蜂后培育成功率：基础 25%，每连续失败一次 +15%，连败 3 次后第 4 次必成 */
+  /** 新蜂后分化成功率：基础 25%，每连续失败一次 +2%（封顶 100%） */
   queenChance(): number {
+    const sc = this.w.cfg.swarm;
     const fails = Math.max(0, Math.floor(this.w.s.run.colony.queenFails ?? 0));
-    if (fails >= 3) return 1;
-    return Math.min(1, this.w.cfg.swarm.queenSuccessChance + 0.15 * fails);
+    return Math.min(1, sc.queenSuccessChance + sc.queenFailStep * fails);
   }
 
-  /** 分蜂蜂后培育：失败返还一半资源，并提高下一次的成功率（保底）。 */
+  /** 现在能不能尝试分化新蜂后；不能时给出原因 */
+  canRearQueen(): CmdResult {
+    const colony = this.w.s.run.colony;
+    const sc = this.w.cfg.swarm;
+    if (colony.youngQueens >= sc.queenMaxWaiting) {
+      return CmdResult.fail('QUEEN_READY', `已经有 ${colony.youngQueens} 只新蜂后在等待带队，先去分蜂吧`);
+    }
+    if (colony.larvae <= 0) return CmdResult.fail('COLONY_NO_LARVA', '先孵化一枚新卵：新蜂后要从幼虫分化');
+    if (!this.w.econ.canAfford(this.queenCost())) {
+      return CmdResult.fail('ECON_SHORT', `分化新蜂后需要 ${sc.queenJelly} 蜂王浆（现有 ${Math.floor(this.w.econ.num(Res.Jelly))}）`);
+    }
+    return CmdResult.ok('');
+  }
+
+  /**
+   * 选一只幼虫分化为新蜂后：消耗 1 只幼虫 + 10 蜂王浆。
+   * 成功率 25% 起，每连续失败一次 +2%；失败返还一半蜂王浆，那只幼虫没长成蜂后，仍留作普通幼虫。
+   */
   differentiateQueen(): CmdResult {
     const colony = this.w.s.run.colony;
-    if (colony.youngQueens > 0) return CmdResult.fail('QUEEN_READY', '新蜂后已经准备好，可以发起分蜂');
+    const can = this.canRearQueen();
+    if (!can.ok) return can;
     const costs = this.queenCost();
-    if (!this.w.econ.canAfford(costs)) {
-      return CmdResult.fail('ECON_SHORT', `培育新蜂后需要${this.w.cfg.swarm.queenHoney}蜂蜜、${this.w.cfg.swarm.queenWax}蜂蜡和${this.w.cfg.swarm.queenJelly}蜂王浆`);
-    }
     if (!this.w.econ.spend(costs, Reason.Hatch, 'young-queen')) {
-      return CmdResult.fail('ECON_SHORT', '培育新蜂后的资源不足');
+      return CmdResult.fail('ECON_SHORT', '分化新蜂后的蜂王浆不足');
     }
     colony.queenAttempts += 1;
     const chance = this.queenChance();
@@ -75,12 +86,15 @@ export class ColonyService {
       colony.queenFails = (colony.queenFails ?? 0) + 1;
       this.w.econ.refund(costs, 0.5, 'young-queen-refund');
       const next = Math.round(this.queenChance() * 100);
-      this.w.msg('warn', `这次蜂后没能分化成功，返还了一半育王资源。下次成功率 ${next}%${next >= 100 ? '（必定成功）' : ''}。`);
-      return CmdResult.fail('QUEEN_FAILED', `没有成功，已返还一半资源 · 下次成功率 ${next}%`);
+      this.w.msg('warn', `这只幼虫没能分化成蜂后，返还了一半蜂王浆，它仍是普通幼虫。下次成功率 ${next}%。`);
+      return CmdResult.fail('QUEEN_FAILED', `没有成功，返还一半蜂王浆 · 下次成功率 ${next}%`);
     }
+    colony.larvae = Math.max(0, colony.larvae - 1);
+    colony.plan.larvae = Math.min(colony.plan.larvae, colony.larvae);
     colony.queenFails = 0;
     colony.youngQueens += 1;
-    this.w.msg('milestone', '新蜂后分化成功！她已经可以带领一半蜂群和资源建立新巢。');
+    this.w.gainXp(20);
+    this.w.msg('milestone', '新蜂后分化成功！她可以带走一半蜂群和资源，在附近原地分蜂，或远征新的种区。');
     this.w.emit('milestone', 0, 0, '新蜂后诞生', 'hive');
     return CmdResult.ok('新蜂后分化成功');
   }

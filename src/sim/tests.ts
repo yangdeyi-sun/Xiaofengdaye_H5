@@ -243,8 +243,8 @@ guardGate.step(0.1);
 ok(guardGate.run.colony.batches.length === 0, 'legacy auto flags cannot differentiate a guard');
 guardGate.differentiate(Role.Guard, 1);
 ok(guardGate.run.colony.batches.some((b) => b.targetRole === Role.Guard), 'player chooses first guard manually');
-guardGate.run.res[Res.Honey] = BigNum.of(1e9);
-ok(guardGate.threats.bearTribute() <= 600, 'bear tribute is capped in first cycle');
+guardGate.run.res[Res.Honey] = BigNum.of(1000);
+ok(Math.abs(guardGate.threats.bearTribute() - 100) < 1e-6, 'novice bear only takes a little honey');
 
 // ---------- 100 次保存与重启 ----------
 let cur = eng.state;
@@ -291,18 +291,26 @@ const resPart = pv.sources[pv.sources.length - 1].points;
 ok(resPart <= pv.total * 0.2 + 1e-9, 'resource bonus <= 20%', `${resPart}/${pv.total}`);
 ok(!pv.ready && !eng4.swarm('alpine').ok, 'swarm blocked when not ready');
 const queenEngine = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'queen-attempt', 0, 77));
-queenEngine.run.res[Res.Honey] = BigNum.of(50000);
-queenEngine.run.res[Res.Wax] = BigNum.of(20000);
-queenEngine.run.res[Res.Jelly] = BigNum.of(250);
+queenEngine.run.res[Res.Jelly] = BigNum.of(500);
+ok(!queenEngine.differentiateQueen().ok && queenEngine.w.econ.num(Res.Jelly) === 500, 'queen rearing needs a larva first');
+queenEngine.run.colony.larvae = 1;
 let queenTries = 0;
-while (queenEngine.run.colony.youngQueens === 0 && queenTries < 20) {
+let queenChanceOk = true;
+while (queenEngine.run.colony.youngQueens === 0 && queenTries < 60) {
+  const expect = Math.min(1, 0.25 + 0.02 * queenTries);
+  if (Math.abs(queenEngine.colony.queenChance() - expect) > 1e-9) queenChanceOk = false;
   queenTries += 1;
   queenEngine.differentiateQueen();
 }
-ok(queenEngine.run.colony.youngQueens === 1 && queenEngine.run.colony.queenAttempts === queenTries && queenTries <= 4 &&
-  Math.abs(queenEngine.w.econ.num(Res.Honey) - (50000 - queenTries * 1000 + (queenTries - 1) * 500)) < 1e-6,
-  'queen rearing refunds half on failure and is guaranteed by the 4th attempt',
-  `${queenEngine.run.colony.youngQueens}/${queenEngine.run.colony.queenAttempts}/${queenTries}/${queenEngine.w.econ.num(Res.Honey)}`);
+ok(queenChanceOk, 'queen chance starts at 25% and grows 2% per failure');
+ok(queenEngine.run.colony.youngQueens === 1 && queenEngine.run.colony.queenAttempts === queenTries &&
+  queenEngine.run.colony.larvae === 0 && (queenEngine.run.colony.queenFails ?? 0) === 0 &&
+  Math.abs(queenEngine.w.econ.num(Res.Jelly) - (500 - queenTries * 10 + (queenTries - 1) * 5)) < 1e-6,
+  'queen rearing costs 10 jelly and a larva; failures refund half and keep the larva',
+  `${queenEngine.run.colony.youngQueens}/${queenEngine.run.colony.queenAttempts}/${queenTries}/${queenEngine.w.econ.num(Res.Jelly)}/${queenEngine.run.colony.larvae}`);
+queenEngine.run.res[Res.Jelly] = BigNum.of(9);
+queenEngine.run.colony.larvae = 3;
+ok(!queenEngine.differentiateQueen().ok && queenEngine.run.colony.larvae === 3, 'queen rearing needs 10 jelly');
 eng4.state.meta.swarmCount = 50;
 const eased = eng4.swarmPreview();
 const easedHoney = eased.conditions.find((c) => c.id === 'honey');
@@ -335,22 +343,55 @@ e5.run.stats.pollinations = 1;
 e5.run.map.fields.forEach((f) => { f.discovered = true; });
 for (const t of DEFAULT_CONFIG.tracks.slice(0, 6)) e5.run.upgrades[t.id] = 4;
 const before5 = e5.state.meta.inheritance.totalPoints;
+const gated = e5.swarm('rooftop');
+ok(!gated.ok && gated.code === 'PROG_SWARM_GATE' && e5.run.colony.youngQueens === 1,
+  'zone swarm is gated by colonies at the current location', gated.message);
+ok(e5.prog.zoneColoniesNeeded(DEFAULT_CONFIG.regions.find((r) => r.id === 'rooftop')!) === 4 &&
+  e5.prog.zoneColoniesNeeded(DEFAULT_CONFIG.regions.find((r) => r.id === 'rainy')!) === 2 &&
+  e5.prog.zoneColoniesNeeded(DEFAULT_CONFIG.regions.find((r) => r.id === 'alpine')!) === 3, 'zone gates scale with difficulty (min 2)');
+// 原地分蜂：只要新蜂后；带走一半；玩家留在原蜂群
+const honeyBeforeLocal = e5.w.econ.num(Res.Honey);
+const foragerBeforeLocal = e5.w.role(Role.Forager);
+const activeBeforeLocal = e5.state.activeColonyId;
+const localPv = e5.localPreview();
+ok(localPv.ready && !localPv.sources.some((x) => x.label.startsWith('种区完成') || x.label.startsWith('难度')),
+  'local swarm only needs a queen and pays eco/production points only');
+const lsw = e5.swarmLocal();
+ok(lsw.ok && e5.state.activeColonyId === activeBeforeLocal && e5.run.regionId === 'meadow' &&
+  e5.state.colonies.length === 1 && e5.state.colonies[0].run.regionId === 'meadow' &&
+  e5.w.role(Role.Forager) === foragerBeforeLocal - Math.floor(foragerBeforeLocal / 2) &&
+  Math.abs(e5.w.econ.num(Res.Honey) - honeyBeforeLocal / 2) < 1e-6 && e5.run.colony.youngQueens === 0,
+  'local swarm takes half the resources and bees, the player stays with the parent', lsw.message);
+ok(e5.prog.regionColonies() === 2 && e5.state.meta.history.length === 1 && e5.state.meta.history[0].kind === 'local',
+  'local swarm adds a colony at the same location');
+ok(e5.localPreview().total === 0 || e5.localPreview().sources.some((x) => x.points < 0), 'points already paid by this colony are not paid twice');
+ok(e5.state.colonies[0].name.includes('2号'), 'new colonies at the same place get a number', e5.state.colonies[0].name);
+// 补齐到 4 个蜂群后才能去屋顶
+for (let i = 0; i < 2; i++) {
+  e5.state.colonies.push({ id: `extra-${i}`, name: 'x', run: decodeEnvelope(text).state!.run, lastActiveAt: 0 });
+}
+e5.run.res[Res.Honey] = BigNum.of(1e6);
+e5.run.res[Res.Jelly] = BigNum.of(50);
+e5.run.colony.roles[Role.Forager] = 200;
+e5.run.colony.youngQueens = 1;
 const adultsBeforeSwarm = e5.w.adults();
 const sw = e5.swarm('rooftop');
 ok(sw.ok, 'swarm executes', sw.message);
 ok(e5.run.regionId === 'rooftop' && e5.run.time === 0 &&
   Math.abs(e5.w.adults() - adultsBeforeSwarm / 2) <= 2,
   'swarm carries half the adults to new region', `${adultsBeforeSwarm}/${e5.w.adults()}`);
-ok(e5.state.meta.inheritance.totalPoints > before5 && e5.state.meta.swarmCount === 1, 'swarm grants points');
+ok(e5.state.meta.inheritance.totalPoints > before5 && e5.state.meta.swarmCount === 2, 'swarm grants points');
 ok(e5.state.meta.codexFlowers.length > 0, 'swarm keeps codex');
 ok(Object.keys(e5.run.upgrades).length === 0 && Object.keys(e5.run.research).length === 0, 'swarm resets upgrades');
-ok(e5.state.colonies.length === 1 && e5.state.colonies[0].run.colony.roles[Role.Forager] === 100 &&
-  Math.abs(e5.run.res[Res.Honey].toNumber() - e5.state.colonies[0].run.res[Res.Honey].toNumber()) < 1e-6,
+const parentSlot = e5.state.colonies.find((slot) => slot.id === activeBeforeLocal)!;
+ok(e5.state.colonies.length === 4 && parentSlot !== undefined && parentSlot.run.colony.roles[Role.Forager] === 100 &&
+  Math.abs(e5.run.res[Res.Honey].toNumber() - parentSlot.run.res[Res.Honey].toNumber()) < 1e-6,
   'swarm splits adults and current resources equally while preserving original colony');
-ok(e5.hive.constructionCostMul() === costMulFor(1, 3) && e5.hive.constructionCostMul() > 2 && e5.hive.constructionCostMul() < 4,
-  'new hive cost multiplier follows generation and region difficulty', `${e5.hive.constructionCostMul()}`);
+ok(e5.hive.constructionCostMul() === costMulFor(3) && costMulFor(0) === 1 && costMulFor(3) === 2.2 && e5.run.regionIndex === 1,
+  'new hive cost multiplier only follows region difficulty', `${e5.hive.constructionCostMul()}`);
 const multiSave = decodeEnvelope(encodeEnvelope(e5.state, DEFAULT_CONFIG.configVersion, 6000));
-ok(multiSave.ok && multiSave.state?.colonies.length === 1 && multiSave.state.colonies[0].run.res[Res.Honey] instanceof BigNum,
+ok(multiSave.ok && multiSave.state?.colonies.length === 4 && multiSave.state.colonies[0].run.res[Res.Honey] instanceof BigNum &&
+  multiSave.state.meta.history.length === 2 && multiSave.state.meta.colonyNames !== undefined,
   'multi-colony save roundtrip preserves BigNum resources');
 const rooftopMax = Math.max(...e5.run.hive.cells.map((c) => c.ring));
 ok(rooftopMax === 3, 'rooftop region rule maxRing=3', `${rooftopMax}`);
@@ -391,12 +432,16 @@ e6.run.res[Res.Nectar] = BigNum.zero();
 e6.run.colony.roles[Role.Forager] = 300;
 e6.run.map.fields.forEach((f) => { f.stock = 0; });
 e6.season.startFormal();
+// 只观察越冬：关掉敌害（新手后的敌害会咬死蜜蜂）
+e6.run.threats.active = [];
+e6.run.threats.nextSpawnAt = 1e9;
+e6.run.threats.nextBearAt = 1e9;
 e6.run.season.season = 'winter';
 e6.run.season.endsAt = e6.run.time + 100;
 const adults6 = e6.w.adults();
 let starvedSeen = false;
 for (let i = 0; i < 600; i++) { e6.step(0.1); starvedSeen = starvedSeen || e6.run.season.starving; }
-ok(starvedSeen && e6.w.adults() === adults6, 'first winter: starving but no deaths/injury loss');
+ok(starvedSeen && e6.w.adults() === adults6, 'first winter: starving but no deaths/injury loss', `${e6.w.adults()}/${adults6}`);
 ok(e6.w.injured(Role.Forager) === 0, 'first winter protected: no injuries');
 
 // ---------- 后续冬季链式衰败 ----------
@@ -818,5 +863,132 @@ if (legacyState !== null) {
     'swarm takes half the bees and all star bees go with the new queen');
 }
 
+{
+  // 敌害致死：新手阶段只受伤；新手结束后会咬死蜜蜂，强度随轮回上升，守卫能减少伤亡
+  const mkWasp = (seedName: string, tutorialDone: boolean, cycle: number, guards: number): GameEngine => {
+    const st = createInitialState(DEFAULT_CONFIG, seedName, 0, 61);
+    st.meta.tutorialDone = tutorialDone;
+    const en = new GameEngine(DEFAULT_CONFIG, st);
+    const cells = en.run.hive.cells.filter((c) => c.unlocked && c.building === '');
+    cells[0].building = Bld.ForagerRoom;
+    if (guards > 0) cells[1].building = Bld.GuardRoom;
+    en.hive.reindex();
+    en.run.colony.roles[Role.Forager] = 40;
+    en.run.colony.roles[Role.Guard] = guards;
+    en.run.season.cycleIndex = cycle;
+    en.run.threats.enabled = true;
+    en.run.threats.nextSpawnAt = 1e9;
+    en.run.threats.nextBearAt = 1e9;
+    const f = en.run.map.fields[0];
+    // 打不死的胡蜂，专门观察致死速度
+    en.run.threats.active.push({ eventId: 'w1', type: ThreatType.Wasp, targetId: f.fieldId, phase: ThreatPhase.Active,
+      hp: 1e9, maxHp: 1e9, startedAt: 0, endsAt: 1e9, postponed: 0, settled: false });
+    en.w.attrs.recompute();
+    return en;
+  };
+  const novice = mkWasp('lethal-novice', false, 0, 0);
+  for (let i = 0; i < 300; i++) novice.step(0.5);
+  ok(novice.w.role(Role.Forager) === 40 && (novice.run.stats.beesLost ?? 0) === 0, 'before the tutorial ends threats never kill bees');
+  const early = mkWasp('lethal-early', true, 0, 0);
+  for (let i = 0; i < 300; i++) early.step(0.5);
+  const earlyLost = 40 - early.w.role(Role.Forager);
+  ok(earlyLost >= 1 && earlyLost <= 2 && (early.run.stats.beesLost ?? 0) === earlyLost && early.run.threats.active[0].killed === earlyLost,
+    'after the tutorial a wasp kills foragers (capped per wasp)', `${earlyLost}`);
+  ok(early.roster.list().filter((b) => b.r === Role.Forager).length === early.w.role(Role.Forager) &&
+    early.state.messages.some((m) => m.kind === 'loss' && m.text.includes('被胡蜂咬死了')), 'dead bees leave the roster by name');
+  const late = mkWasp('lethal-late', true, 4, 0);
+  for (let i = 0; i < 180; i++) late.step(0.5);
+  const lateLost = 40 - late.w.role(Role.Forager);
+  const earlyQuick = mkWasp('lethal-early2', true, 0, 0);
+  for (let i = 0; i < 180; i++) earlyQuick.step(0.5);
+  ok(late.threats.power() > 2 && lateLost > 40 - earlyQuick.w.role(Role.Forager) && late.threats.killCap(late.run.threats.active[0]) > 1,
+    'threats grow deadlier every four-season cycle', `${lateLost}/${40 - earlyQuick.w.role(Role.Forager)}`);
+  const guarded = mkWasp('lethal-guarded', true, 4, 30);
+  for (let i = 0; i < 180; i++) guarded.step(0.5);
+  ok(40 - guarded.w.role(Role.Forager) < lateLost && guarded.threats.defenseView().mitig < 0.3,
+    'guards cut the losses', `${40 - guarded.w.role(Role.Forager)}/${lateLost}`);
+  const off = mkWasp('lethal-offline', true, 4, 0);
+  off.settleOffline(1800, 'lethal-off', '');
+  ok(off.w.role(Role.Forager) === 40, 'no bees die during offline settlement');
+}
+{
+  // 熊：采集蜂巢房建成后才出没，约 30% 判定概率；赶不走 25% 毁巢、75% 上缴蜂蜜；击退有奖励
+  const mkBear = (seedNum: number, forager: boolean): GameEngine => {
+    const st = createInitialState(DEFAULT_CONFIG, `bear-${seedNum}`, 0, seedNum);
+    st.meta.tutorialDone = true;
+    const en = new GameEngine(DEFAULT_CONFIG, st);
+    const cell = en.run.hive.cells.find((c) => c.unlocked && c.building === '')!;
+    if (forager) cell.building = Bld.ForagerRoom;
+    else cell.building = Bld.Brewery;
+    en.hive.reindex();
+    en.run.threats.enabled = true;
+    en.run.threats.nextSpawnAt = 1e9;
+    en.run.res[Res.Honey] = BigNum.of(1000);
+    en.run.colony.roles[Role.House] = 10;
+    en.w.attrs.recompute();
+    return en;
+  };
+  const noRoom = mkBear(201, false);
+  for (let i = 0; i < 4000; i++) noRoom.step(1);
+  ok((noRoom.run.stats.bearsCome ?? 0) === 0 && noRoom.threats.pendingBear() === null, 'no bear before the first forager room');
+  let checks = 0;
+  let bears = 0;
+  for (let k = 0; k < 40; k++) {
+    const en = mkBear(300 + k, true);
+    for (let i = 0; i < 3 * 3600; i += 5) {
+      en.step(5);
+      const bear = en.threats.pendingBear();
+      if (bear !== null) { bear.settled = true; bear.phase = ThreatPhase.Expired; }
+    }
+    checks += Math.floor(3 * 3600 / 450);
+    bears += en.run.stats.bearsCome ?? 0;
+  }
+  const rate = bears / checks;
+  ok(rate > 0.15 && rate < 0.45, 'bears show up at random about 30% of checks after the forager room', `${bears}/${checks}`);
+  let destroyed = 0;
+  let paid = 0;
+  for (let k = 0; k < 60; k++) {
+    const en = mkBear(500 + k, true);
+    en.run.threats.active.push({ eventId: 'b1', type: ThreatType.Bear, targetId: 'hive', phase: ThreatPhase.Active,
+      hp: 1e9, maxHp: 1e9, startedAt: 0, endsAt: 1, postponed: 0, settled: false });
+    en.step(1.05);
+    if (en.w.adults() === 0 && en.w.econ.num(Res.Honey) === 0 && (en.state.meta.hivesLost ?? 0) === 1) destroyed++;
+    else if (Math.abs(en.w.econ.num(Res.Honey) - 800) < 50) paid++;
+  }
+  ok(destroyed > 5 && destroyed < 28 && destroyed + paid === 60, 'an unrepelled bear wrecks the hive 25% of the time, otherwise bees pay honey', `${destroyed}/${paid}`);
+  const novice = mkBear(700, true);
+  novice.state.meta.tutorialDone = false;
+  novice.run.threats.active.push({ eventId: 'b2', type: ThreatType.Bear, targetId: 'hive', phase: ThreatPhase.Active,
+    hp: 1e9, maxHp: 1e9, startedAt: 0, endsAt: 1, postponed: 0, settled: false });
+  novice.step(1.05);
+  ok(novice.w.adults() === 10 && Math.abs(novice.w.econ.num(Res.Honey) - 900) < 50, 'a novice bear never wrecks the hive');
+  const swat = mkBear(800, true);
+  swat.run.threats.nextBearAt = 1e9;
+  swat.run.threats.active.push({ eventId: 'b3', type: ThreatType.Bear, targetId: 'hive', phase: ThreatPhase.Warning,
+    hp: 260, maxHp: 260, startedAt: 0, endsAt: 60, postponed: 0, settled: false });
+  ok(!swat.bearChoice('b3', 'tribute').ok && swat.bearChoice('b3', 'defend').ok && swat.threats.pendingBear()?.phase === 'active',
+    'bear choices: only defend (or the ad) remain');
+  let taps = 0;
+  while (swat.threats.pendingBear() !== null && taps < 60) { taps++; swat.swatThreat('b3'); swat.step(0.13); }
+  ok(swat.threats.pendingBear() === null && swat.run.stats.bearsRepelled === 1 && taps <= 25, 'swatting drives the bear away', `${taps}`);
+}
+{
+  // 冬季也有季节事件；保卫战第 3 轮起 4 波
+  const ws = createInitialState(DEFAULT_CONFIG, 'winter-ev', 0, 71);
+  ws.meta.tutorialDone = true;
+  const we = new GameEngine(DEFAULT_CONFIG, ws);
+  we.run.season.formal = true;
+  we.run.season.season = 'winter';
+  we.run.season.startedAt = we.run.time;
+  we.run.season.endsAt = we.run.time + 240;
+  we.run.res[Res.Honey] = BigNum.of(1000);
+  for (let i = 0; i < 30 && we.events.view() === null; i++) we.step(1);
+  const wv = we.events.view();
+  ok(wv !== null && (wv.id === 'cold' || wv.id === 'sunny'), 'winter has a season event too', wv?.id ?? 'none');
+  we.run.season.event = { id: 'cold', key: 'kc', until: we.run.time + 100, resolved: false };
+  const loss0 = we.w.attrs.get('storage.winterLoss');
+  ok(we.events.choose('huddle').ok && we.w.attrs.get('storage.winterLoss') < loss0, 'huddling lowers winter upkeep');
+  ok(we.threats.raidWaves(1) === 3 && we.threats.raidWaves(3) === 4, 'raids have 3 waves early and 4 later');
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

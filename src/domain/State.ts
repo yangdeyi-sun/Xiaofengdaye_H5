@@ -56,7 +56,7 @@ export interface ColonyState {
   plan: BreedPlan;
   /** 有名字的蜜蜂名册：与各工种数量保持一致（缺省兼容旧存档，首次运行时补齐） */
   roster?: NamedBee[];
-  /** 新蜂后培育连续失败次数（保底：每失败一次成功率 +15%，第 4 次必成） */
+  /** 新蜂后分化连续失败次数（每失败一次成功率 +2%） */
   queenFails?: number;
   /** 幸运孵化：接下来还有几只幼虫享受更高的明星蜂概率 */
   luckyHatch?: number;
@@ -182,6 +182,8 @@ export interface ThreatEvent {
   raid?: boolean;
   /** 胡蜂王 */
   boss?: boolean;
+  /** 这只敌害已经咬死的蜜蜂数（每只敌害有上限） */
+  killed?: number;
 }
 
 /** 蜂巢保卫战：每个四季轮回的秋天一次，三波胡蜂后出现胡蜂王 */
@@ -251,6 +253,12 @@ export interface RunStats {
   springSupplyCycle?: number;
   /** 本种区赢得的蜂巢保卫战次数 */
   raidWins?: number;
+  /** 这个蜂群历次分蜂已经领过的传承点（防止同一个蜂群反复分蜂重复领取） */
+  legacyPaid?: number;
+  /** 被敌害咬死的蜜蜂数量 */
+  beesLost?: number;
+  /** 熊袭击次数与结局 */
+  bearsCome?: number;
 }
 
 /** 季节事件：每个季节开头出现一个可以选择的小事件 */
@@ -362,6 +370,10 @@ export interface SwarmRecord {
   playTime: number;
   peakPop: number;
   endedAt: number;
+  /** local 原地分蜂 / zone 种区分蜂（缺省按种区分蜂处理，兼容旧存档） */
+  kind?: string;
+  /** 新蜂群落脚的种区 */
+  toRegion?: string;
 }
 
 /** 永久状态：图鉴、成就、外观、传承、设置、教学（PROG-004） */
@@ -394,6 +406,10 @@ export interface MetaState {
   starCodex?: string[];
   /** 蜂巢保卫战胜利次数 */
   raidWins?: number;
+  /** 蜂群名字（按蜂群编号），同一种区有多个蜂群时用来区分 */
+  colonyNames?: Record<string, string>;
+  /** 被熊毁掉的蜂巢次数 */
+  hivesLost?: number;
 }
 
 export interface KingdomState {

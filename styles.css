@@ -339,6 +339,7 @@ small { color: var(--sub); }
 .region-card .art-image { width: 112px; height: 100%; min-height: 112px; object-fit: cover; }
 .region-card > span { display: grid; align-content: center; gap: 5px; padding: 12px; }
 .region-card em { color: var(--accent-dark); font-style: normal; }
+.region-card.locked .art-image { filter: grayscale(.6); opacity: .75; }
 .gain-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .gain-item { padding: 10px; border-radius: 12px; background: #fff1d0; text-align: center; }
 .keep-list, .reset-list { padding-left: 20px; line-height: 1.65; }

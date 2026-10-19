@@ -1,9 +1,30 @@
 import { BigNum } from '../common/BigNum';
-import { GuardPriority, Reason, Res, RewardDef, Role, ThreatDef, ThreatPhase, ThreatType } from './Types';
+import { Bld, GuardPriority, Reason, Res, RewardDef, Role, ThreatDef, ThreatPhase, ThreatType } from './Types';
 import { FlowerField, ThreatEvent } from './State';
 import { CmdResult, ForageAlloc, World, softExponent } from './World';
 
 const RES_NAME: Record<string, string> = { honey: '蜂蜜', wax: '蜂蜡', jelly: '蜂王浆', nectar: '花蜜' };
+
+/** 熊：首个采集蜂巢房建成后，每隔 5~10 分钟（在线时间）判定一次，30% 概率出现 */
+export const BEAR_CHANCE = 0.3;
+export const BEAR_CHECK_MIN = 300;
+export const BEAR_CHECK_MAX = 600;
+/** 没能击退熊时：25% 整个蜂巢被毁（当前蜂群重开），其余情况蜜蜂上缴一部分蜂蜜 */
+export const BEAR_DESTROY_CHANCE = 0.25;
+export const BEAR_TRIBUTE_RATIO = 0.2;
+
+/** 敌害强度每个四季轮回增加的比例 */
+export const POWER_PER_CYCLE = 0.3;
+/** 新手结束后敌害每秒咬死蜜蜂的基础速度（乘以敌害强度与守卫减伤） */
+const KILL_RATE: Record<string, number> = { wasp: 0.02, web: 0.012, moth: 0.015, bear: 0.08 };
+/** 敌害咬死的工种顺序：前面的没有了才轮到后面的 */
+const KILL_TARGET: Record<string, string[]> = {
+  wasp: [Role.Forager, Role.Scout],
+  web: [Role.Forager, Role.Scout],
+  moth: ['larva', Role.House],
+  bear: [Role.Guard, Role.House, Role.Forager]
+};
+const ROLE_WORD: Record<string, string> = { forager: '采集蜂', scout: '侦察蜂', house: '巢内工蜂', guard: '守卫蜂', larva: '幼虫' };
 
 /** 敌害与防御（ECO-005~009，BEE-006） */
 export class ThreatService {
@@ -15,6 +36,11 @@ export class ThreatService {
   /** 亲手拍打的节流（不存档） */
   private lastSwatAt: Record<string, number> = {};
   private tutorialWasDone: boolean;
+  /** 致死累积（不存档）：按敌害 id 记录不足一只的部分 */
+  private deathAcc: Record<string, number> = {};
+  private guardDeathAcc: number = 0;
+  /** 本帧被熊毁掉的蜂巢（由 GameEngine 在本步结束后处理重开） */
+  hiveLost: string = '';
 
   constructor(w: World) {
     this.w = w;
@@ -42,7 +68,107 @@ export class ThreatService {
     }
     th.enabled = true;
     th.nextSpawnAt = this.w.s.run.time + (this.w.s.meta.tutorialDone ? 90 : 120);
-    th.nextBearAt = this.w.s.run.time + 1500;
+    // 熊的判定从第一个采集蜂巢房建成后才开始计时（见 spawnTick）
+    th.nextBearAt = 0;
+  }
+
+  // ---------------- 敌害强度与致死 ----------------
+  /** 敌害强度：每个四季轮回 +30%，难度高的种区更强 */
+  power(): number {
+    const cycle = Math.max(0, this.w.s.run.season.cycleIndex);
+    return (1 + POWER_PER_CYCLE * cycle) * (1 + 0.15 * Math.max(0, this.w.region().difficulty));
+  }
+
+  /** 新手引导结束后，敌害才会咬死蜜蜂；离线结算期间不死蜂 */
+  lethal(): boolean {
+    return this.w.s.meta.tutorialDone && !this.w.offline;
+  }
+
+  /** 守卫攻击力（攻击效率 × 巡逻范围） */
+  guardAttack(): number {
+    return this.w.attrs.get('guard.attack') * this.w.attrs.get('guard.range');
+  }
+
+  /** 守卫减伤：防御越强，敌害咬死的蜜蜂越少（0~1，越小越安全） */
+  mitigation(defense: number): number {
+    const p = this.power();
+    return p / (p + Math.max(0, defense) * 0.6);
+  }
+
+  /** 每只敌害最多咬死几只（随轮回增加） */
+  killCap(e: ThreatEvent): number {
+    const cycle = Math.max(0, this.w.s.run.season.cycleIndex);
+    return e.type === ThreatType.Bear ? 3 + 2 * cycle : 1 + cycle;
+  }
+
+  /** 界面：守卫全部出动对付一只敌害时，伤亡还剩多少 */
+  defenseView(): { power: number; guards: number; attack: number; mitig: number; lethal: boolean } {
+    const guards = this.w.active(Role.Guard);
+    const attack = this.guardAttack();
+    return { power: this.power(), guards, attack, mitig: this.mitigation(guards * attack), lethal: this.w.s.meta.tutorialDone };
+  }
+
+  /** 一只交战中的敌害按时间咬死蜜蜂（新手后才会发生） */
+  private lethalTick(e: ThreatEvent, defense: number, dt: number): void {
+    if (!this.lethal()) return;
+    const rate = KILL_RATE[e.type] ?? 0;
+    if (rate <= 0) return;
+    const cap = this.killCap(e);
+    if ((e.killed ?? 0) >= cap) return;
+    const acc = (this.deathAcc[e.eventId] ?? 0) + rate * this.power() * this.mitigation(defense) * dt;
+    if (acc < 1) { this.deathAcc[e.eventId] = acc; return; }
+    this.deathAcc[e.eventId] = acc - 1;
+    const order = KILL_TARGET[e.type] ?? [Role.Forager];
+    const colony = this.w.s.run.colony;
+    for (let i = 0; i < order.length; i++) {
+      const role = order[i];
+      if (role === 'larva') {
+        if (colony.larvae <= 0) continue;
+        colony.larvae -= 1;
+        colony.plan.larvae = Math.min(colony.plan.larvae, colony.larvae);
+        this.recordDeath(e, role, '');
+        return;
+      }
+      // 每个工种至少留 1 只，避免蜂群直接断档
+      if (this.w.role(role) <= 1) continue;
+      const names = this.w.onDeath(role, 1);
+      this.recordDeath(e, role, names[0] ?? '');
+      return;
+    }
+  }
+
+  private recordDeath(e: ThreatEvent, role: string, name: string): void {
+    e.killed = (e.killed ?? 0) + 1;
+    const st = this.w.s.run.stats;
+    st.beesLost = (st.beesLost ?? 0) + 1;
+    const who = e.boss === true ? '胡蜂王' : this.def(e.type).name;
+    const word = ROLE_WORD[role] ?? '蜜蜂';
+    const label = role === 'larva' ? `${who}毁掉了 1 只幼虫` : `${word}${name.length > 0 ? `「${name}」` : ''}被${who}咬死了`;
+    this.w.msg('loss', label);
+    const f = this.w.field(e.targetId);
+    if (e.type === ThreatType.Bear) this.w.emit('death', 80, 20, `-1 ${word}`, 'field');
+    else if (e.type === ThreatType.Moth || f === null) this.w.emit('death', 0.8, 0.8, `-1 ${word}`, 'hive');
+    else if (e.type === ThreatType.Wasp) this.w.emit('death', f.x * 0.55, f.y * 0.55, `-1 ${word}`, 'field');
+    else this.w.emit('death', f.x + 12, f.y - 8, `-1 ${word}`, 'field');
+    // 每只敌害第一次造成伤亡时提醒一次：守卫越强，伤亡越少
+    if (e.killed === 1) {
+      this.w.msg('warn', this.w.role(Role.Guard) > 0
+        ? `${who}咬死了${word}！敌害每个轮回都在变强，多培养守卫蜂、升级攻击效率能减少伤亡`
+        : `${who}咬死了${word}！快点它亲手驱赶，并尽早培养守卫蜂`);
+    }
+  }
+
+  /** 交战中的守卫蜂也可能阵亡（新手后），守卫越多分摊越少 */
+  private guardLossTick(engaged: number, bear: boolean, dt: number): void {
+    if (!this.lethal() || engaged <= 0) return;
+    this.guardDeathAcc += engaged * (bear ? 0.002 : 0.0004) * this.power() * dt;
+    if (this.guardDeathAcc < 1) return;
+    this.guardDeathAcc -= 1;
+    if (this.w.role(Role.Guard) <= 1) return;
+    const names = this.w.onDeath(Role.Guard, 1);
+    const st = this.w.s.run.stats;
+    st.beesLost = (st.beesLost ?? 0) + 1;
+    this.w.msg('loss', `守卫蜂${names[0] !== undefined ? `「${names[0]}」` : ''}在战斗中牺牲了`);
   }
 
   private spawn(type: string, targetId: string, quiet: boolean = false): ThreatEvent {
@@ -66,7 +192,9 @@ export class ThreatService {
     if (meta.codexThreats.indexOf(type) < 0) {
       meta.codexThreats.push(type);
     }
-    if (!quiet) this.w.msg('threat', isBear ? '警报：一头熊正在接近蜂巢！可以选择防守、交付蜂蜜或稍后处理。' : this.spawnText(type, targetId));
+    if (!quiet) this.w.msg('threat', isBear ? (this.w.s.meta.tutorialDone
+      ? '警报：一头熊正在接近蜂巢！赶不走它的话，可能整个蜂巢都会被掀翻'
+      : '警报：一头熊正在接近蜂巢！点它拍打可以赶走它') : this.spawnText(type, targetId));
     if (type === ThreatType.Web) {
       const f = this.w.field(targetId);
       if (f !== null) {
@@ -182,14 +310,24 @@ export class ThreatService {
         }
       }
     }
-    // 熊：低频、只在玩家在线时进入正式阶段（ECO-007）
-    if (t >= th.nextBearAt && this.w.interactive) {
-      th.nextBearAt = t + this.w.rng.range(1800, 2700);
-      const bearOpen = th.active.some((e: ThreatEvent) => e.type === ThreatType.Bear && !e.settled);
-      if (!bearOpen && this.w.s.meta.tutorialDone && this.w.role(Role.Guard) > 0 && this.w.adults() >= 30 && !this.w.isWinter()) {
-        this.spawn(ThreatType.Bear, 'hive');
+    // 熊：第一个采集蜂巢房建成后开始，每隔 5~10 分钟判定一次，30% 概率出现；只在玩家在线时出现（ECO-007）
+    if (this.bearEligible()) {
+      if (th.nextBearAt <= 0) th.nextBearAt = t + this.w.rng.range(BEAR_CHECK_MIN, BEAR_CHECK_MAX);
+      if (t >= th.nextBearAt && this.w.interactive) {
+        th.nextBearAt = t + this.w.rng.range(BEAR_CHECK_MIN, BEAR_CHECK_MAX);
+        const bearOpen = th.active.some((e: ThreatEvent) => e.type === ThreatType.Bear && !e.settled);
+        if (!bearOpen && !this.raidActive() && !this.w.isWinter() && this.w.rng.chance(BEAR_CHANCE)) {
+          this.spawn(ThreatType.Bear, 'hive');
+          const st = this.w.s.run.stats;
+          st.bearsCome = (st.bearsCome ?? 0) + 1;
+        }
       }
     }
+  }
+
+  /** 熊开始出没：本蜂巢建成了第一个采集蜂巢房 */
+  bearEligible(): boolean {
+    return this.w.count(Bld.ForagerRoom) > 0;
   }
 
   /** 守卫分配：按玩家优先级把守卫派往有威胁的区域 */
@@ -231,19 +369,25 @@ export class ThreatService {
     return r !== undefined && (r.phase === 'warn' || r.phase === 'fight');
   }
 
-  /** 保卫战敌人：前两波普通胡蜂，第三波胡蜂王带一只护卫 */
+  /** 保卫战波数：前两个秋天 3 波，第 3 轮四季起 4 波（最后一波都是胡蜂王） */
+  raidWaves(cycle: number = this.w.s.run.threats.raid?.cycle ?? this.w.s.run.season.cycleIndex): number {
+    return cycle >= 3 ? 4 : 3;
+  }
+
+  /** 保卫战敌人：普通胡蜂若干波，最后一波胡蜂王带一只护卫 */
   private spawnWave(wave: number): void {
     const run = this.w.s.run;
     const fields = run.map.fields.filter((f: FlowerField) => f.discovered)
       .sort((a: FlowerField, b: FlowerField) => this.beesAt(b.fieldId) - this.beesAt(a.fieldId) || a.dist - b.dist);
     if (fields.length === 0) return;
-    const n = wave === 1 ? 2 : (wave === 2 ? 3 : 2);
+    const last = this.raidWaves();
+    const n = wave === last ? 2 : (wave === 1 ? 2 : 3);
     for (let i = 0; i < n; i++) {
       const f = fields[i % fields.length];
       const e = this.spawn(ThreatType.Wasp, f.fieldId, true);
       e.raid = true;
       e.endsAt = 0;
-      if (wave === 3 && i === 0) {
+      if (wave === last && i === 0) {
         e.boss = true;
         e.hp *= 5;
         e.maxHp *= 5;
@@ -287,7 +431,7 @@ export class ThreatService {
     if (r.phase === 'warn' && t >= r.endsAt && w.interactive) {
       r.phase = 'fight';
       r.wave = 1;
-      r.endsAt = t + 180;
+      r.endsAt = t + (this.raidWaves(r.cycle) >= 4 ? 220 : 180);
       this.spawnWave(1);
       w.msg('info', '保卫战开始：第 1 波胡蜂来了！');
       return;
@@ -295,10 +439,10 @@ export class ThreatService {
     if (r.phase !== 'fight') return;
     const left = this.raidEnemies();
     if (left.length === 0) {
-      if (r.wave < 3) {
+      if (r.wave < this.raidWaves(r.cycle)) {
         r.wave += 1;
         this.spawnWave(r.wave);
-        w.msg('info', r.wave === 3 ? '胡蜂王亲自来了！把它打跑就赢了' : `第 ${r.wave} 波胡蜂来了！`);
+        w.msg('info', r.wave === this.raidWaves(r.cycle) ? '胡蜂王亲自来了！把它打跑就赢了' : `第 ${r.wave} 波胡蜂来了！`);
       } else {
         this.raidWon(r.cycle);
       }
@@ -340,12 +484,12 @@ export class ThreatService {
   }
 
   /** 界面：保卫战状态 */
-  raidView(): { phase: string; wave: number; remaining: number; left: number; boss: boolean } | null {
+  raidView(): { phase: string; wave: number; waves: number; remaining: number; left: number; boss: boolean } | null {
     const r = this.w.s.run.threats.raid;
     if (r === undefined || (r.phase !== 'warn' && r.phase !== 'fight')) return null;
     const left = this.raidEnemies();
     return {
-      phase: r.phase, wave: r.wave, remaining: Math.max(0, r.endsAt - this.w.s.run.time), left: left.length,
+      phase: r.phase, wave: r.wave, waves: this.raidWaves(r.cycle), remaining: Math.max(0, r.endsAt - this.w.s.run.time), left: left.length,
       boss: left.some((e: ThreatEvent) => e.boss === true)
     };
   }
@@ -389,7 +533,7 @@ export class ThreatService {
         if (t >= e.endsAt && this.w.interactive && !this.w.offline) {
           e.phase = ThreatPhase.Active;
           e.endsAt = t + d.lifetime;
-          this.w.msg('threat', '熊开始袭击蜂巢！守卫蜂正在集结。');
+          this.w.msg('threat', '熊开始袭击蜂巢！快点熊拍打它，守卫蜂也在集结');
         }
         return;
       }
@@ -401,6 +545,11 @@ export class ThreatService {
       e.hp -= dmg;
       if (guards > 0 && e.type === ThreatType.Wasp && !this.w.offline) {
         this.guardInjAcc += guards / n * 0.002 * dt;
+      }
+      // 新手结束后：敌害会咬死蜜蜂，守卫越强伤亡越少；交战的守卫也可能阵亡
+      if (e.hp > 0) {
+        this.lethalTick(e, guards / n * atk, dt);
+        if (guards > 0 && e.type !== ThreatType.Moth) this.guardLossTick(guards / n, e.type === ThreatType.Bear, dt);
       }
       if (e.type === ThreatType.Wasp) {
         eff[e.targetId] = Math.min(eff[e.targetId] === undefined ? 1 : eff[e.targetId], 0.5);
@@ -489,7 +638,10 @@ export class ThreatService {
     }
     this.lastSwatAt[eventId] = t;
     const isBear = e.type === ThreatType.Bear;
-    const dmg = Math.max(1, e.maxHp * (isBear ? 0.05 : (e.boss === true ? 0.04 : 0.17)));
+    // 熊：每下约等于第一轮熊血量的 5%，之后的轮回熊越来越壮，靠亲手拍打会越来越吃力，需要守卫蜂帮忙
+    const baseBear = this.def(ThreatType.Bear).hp * (1 + this.w.region().difficulty * 0.15);
+    const dmg = isBear ? Math.max(1, Math.max(e.maxHp * 0.02, baseBear * 0.05))
+      : Math.max(1, e.maxHp * (e.boss === true ? 0.04 : 0.17));
     e.hp -= dmg;
     const th = this.w.s.run.threats;
     th.swats = (th.swats ?? 0) + 1;
@@ -506,6 +658,7 @@ export class ThreatService {
       return '';
     }
     e.settled = true;
+    delete this.deathAcc[e.eventId];
     const th = this.w.s.run.threats;
     if (th.nextSpawnAt < this.w.s.run.time + 40) th.nextSpawnAt = this.w.s.run.time + 40;
     const d = this.def(e.type);
@@ -553,11 +706,17 @@ export class ThreatService {
     }
     if (e.type !== ThreatType.Bear && e.raid !== true) th.streak = 0;
     if (e.type === ThreatType.Bear) {
-      // 熊造成阶段性损失，封顶 15% 蜂蜜，不摧毁蜂巢
       e.phase = ThreatPhase.Lost;
-      const loss = this.w.econ.amount(Res.Honey).mulN(0.15);
+      // 新手阶段不致命：只抢走一部分蜂蜜。之后没能击退：25% 整个蜂巢被掀翻，75% 蜜蜂上缴蜂蜜
+      if (this.w.s.meta.tutorialDone && this.w.rng.chance(BEAR_DESTROY_CHANCE)) {
+        this.hiveLost = 'bear';
+        this.w.msg('error', '熊把整个蜂巢掀翻了！这个蜂群全军覆没，只能从一座空蜂巢重新开始。');
+        this.w.emit('fail', 0, 0, '蜂巢被熊摧毁', 'any');
+        return '';
+      }
+      const loss = this.w.econ.amount(Res.Honey).mulN(this.w.s.meta.tutorialDone ? BEAR_TRIBUTE_RATIO : 0.1);
       this.w.econ.drain(Res.Honey, loss.toNumber(), Reason.Threat, e.eventId);
-      this.w.msg('warn', `熊抢走了一部分蜂蜜（${Math.round(loss.toNumber())}），蜂巢完好无损。`);
+      this.w.msg('warn', `没能赶走熊：蜜蜂只好上缴 ${Math.round(loss.toNumber())} 蜂蜜，熊心满意足地走了。`);
       return '';
     }
     e.phase = ThreatPhase.Expired;
@@ -565,42 +724,27 @@ export class ThreatService {
     return '';
   }
 
-  /** 熊事件玩家选择：防守 / 提前交付部分蜂蜜 / 稍后处理 */
+  /** 熊没被击退时蜜蜂上缴的蜂蜜（预估，界面展示） */
   bearTribute(): number {
-    const raw = this.w.econ.amount(Res.Honey).mulN(0.08).toNumber();
-    const cap = 600 + softExponent(this.w.s.run.season.cycleIndex, 6, 0.68) * 100;
-    return Math.min(raw, cap);
+    return this.w.econ.amount(Res.Honey).mulN(this.w.s.meta.tutorialDone ? BEAR_TRIBUTE_RATIO : 0.1).toNumber();
   }
 
+  /** 熊事件：现在只有“迎战”——守卫集结到巢门、熊立即进入交战，玩家可以亲手拍打 */
   bearChoice(eventId: string, choice: string): CmdResult {
     const e = this.w.s.run.threats.active.find((x: ThreatEvent) => x.eventId === eventId);
     if (e === undefined || e.settled || e.type !== ThreatType.Bear) {
       return CmdResult.fail('THREAT_NONE', '事件已结束');
     }
-    if (choice === 'tribute') {
-      const pay = BigNum.of(this.bearTribute());
-      this.w.econ.drain(Res.Honey, pay.toNumber(), Reason.Threat, e.eventId);
-      e.settled = true;
-      e.phase = ThreatPhase.Expired;
-      this.w.msg('info', `交付了 ${Math.round(pay.toNumber())} 蜂蜜，熊心满意足地离开了`);
-      return CmdResult.ok('熊离开了');
+    if (choice !== 'defend') {
+      return CmdResult.fail('THREAT_CHOICE', '熊不会等你：只能迎战，或请邻巢援军');
     }
-    if (choice === 'later') {
-      if (e.postponed >= 2) {
-        return CmdResult.fail('THREAT_POSTPONE', '已经推迟过两次了');
-      }
-      e.postponed += 1;
-      e.phase = ThreatPhase.Postponed;
-      e.endsAt = this.w.s.run.time + 600;
-      return CmdResult.ok('熊暂时离开，10 分钟后回来');
-    }
-    // defend：立即进入正式阶段
     if (e.phase !== ThreatPhase.Active) {
       e.phase = ThreatPhase.Active;
       e.endsAt = this.w.s.run.time + this.def(e.type).lifetime;
+      this.w.msg('threat', '熊冲向蜂巢！守卫蜂正在集结，快点熊拍打它');
     }
     this.w.s.run.colony.guardPriority = GuardPriority.Gate;
-    return CmdResult.ok('守卫蜂集结到巢门');
+    return CmdResult.ok('迎战！点熊拍打，守卫蜂也会出击');
   }
 
   pendingBear(): ThreatEvent | null {

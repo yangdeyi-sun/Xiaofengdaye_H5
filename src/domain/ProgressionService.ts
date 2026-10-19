@@ -1,5 +1,5 @@
 import { BigNum } from '../common/BigNum';
-import { AchievementDef, Bld, Reason, Res, ResearchDef, RewardDef, Role, TalentDef, TaskDef, ALL_ROLES } from './Types';
+import { AchievementDef, Bld, Reason, RegionDef, Res, ResearchDef, RewardDef, Role, TalentDef, TaskDef, ALL_ROLES } from './Types';
 import { FlowerField, SwarmRecord, TalentPreset } from './State';
 import { CmdResult, CostAmount, World } from './World';
 import { costMulFor } from './HiveService';
@@ -284,8 +284,7 @@ export class ProgressionService {
   }
 
   researchCost(r: ResearchDef): CostAmount[] {
-    return this.w.econ.costOf(r.costs, this.researchLevel(r.id),
-      costMulFor(this.w.s.run.regionIndex, this.w.region().difficulty));
+    return this.w.econ.costOf(r.costs, this.researchLevel(r.id), costMulFor(this.w.region().difficulty));
   }
 
   research(id: string): CmdResult {
@@ -442,19 +441,114 @@ export class ProgressionService {
   }
 
   // ---------------- 分蜂（PROG-002~005） ----------------
-  swarmPreview(): SwarmPreview {
+  /** 所有蜂群（当前 + 其余）中，位于某种区的蜂群数量 */
+  regionColonies(regionId: string = this.w.s.run.regionId): number {
+    const s = this.w.s;
+    let n = s.run.regionId === regionId ? 1 : 0;
+    s.colonies.forEach((slot) => { if (slot.run.regionId === regionId) n += 1; });
+    return n;
+  }
+
+  /** 去某个种区（副本）之前，出发地至少要有几个蜂群：最低 2，难度越高越多 */
+  zoneColoniesNeeded(region: RegionDef): number {
+    return Math.max(this.w.cfg.swarm.zoneMinColonies, 1 + Math.max(0, region.difficulty));
+  }
+
+  /** 已完成的种区分蜂次数（分蜂条件只随种区分蜂增长，原地分蜂不抬高门槛） */
+  zoneSwarms(): number {
+    return this.w.s.meta.history.filter((h: SwarmRecord) => h.kind !== 'local').length;
+  }
+
+  /** 可以前往的种区（当前所在种区之外的） */
+  zoneTargets(): RegionDef[] {
+    return this.w.cfg.regions.filter((r: RegionDef) => r.id !== this.w.s.run.regionId);
+  }
+
+  /** 生态目标：本蜂群在这里做成的事 */
+  private ecoPoints(discovered: number): number {
+    const run = this.w.s.run;
+    let eco = 0;
+    eco += Math.min(3, run.season.wintersSurvived) * 2;
+    eco += run.stats.rareFound > 0 ? 2 : 0;
+    eco += discovered >= run.map.fields.length - 2 ? 2 : 0;
+    eco += run.threats.cleared >= 10 ? 2 : 0;
+    eco += run.stats.pollinations >= 3 ? 2 : 0;
+    return eco;
+  }
+
+  /** 传承点来源。种区分蜂拿全部；原地分蜂只拿生态目标、累计产量和剩余资源折算 */
+  private pointSources(kind: string): PointSource[] {
     const w = this.w;
     const run = w.s.run;
-    const meta = w.s.meta;
+    const sc = w.cfg.swarm;
+    const out: PointSource[] = [];
+    const discovered = run.map.fields.filter((f: FlowerField) => f.discovered && !f.home).length;
+    const region = w.region();
+    if (kind !== 'local') out.push(new PointSource('种区完成基础奖励', sc.basePoints));
+    out.push(new PointSource('生态目标奖励', this.ecoPoints(discovered)));
+    if (kind !== 'local') {
+      out.push(new PointSource(`难度奖励（${region.name}）`, region.difficulty * 4));
+      if (this.regionMastered(run.regionId)) out.push(new PointSource('种区专属成就', 3));
+      if ((run.stats.raidWins ?? 0) > 0) out.push(new PointSource('赢得蜂巢保卫战', 2));
+    }
+    const produced = run.produced[Res.Honey] === undefined ? BigNum.zero() : run.produced[Res.Honey];
+    out.push(new PointSource('累计产量（对数）', Math.max(0, Math.floor(produced.log10()) - 2)));
+    let subtotal = 0;
+    out.forEach((x: PointSource) => { subtotal += x.points; });
+    // 剩余资源折算：最高占本次结算 20%（PROG-005）
+    const raw = Math.floor(Math.pow(Math.max(0, w.econ.num(Res.Honey)), 0.25) / 4);
+    const capRes = Math.floor(subtotal * sc.resourceBonusCap / (1 - sc.resourceBonusCap));
+    out.push(new PointSource('剩余资源折算（上限20%）', Math.min(raw, capRes)));
+    // 同一个蜂群再次分蜂时，之前已经领过的部分不再重复发放
+    let eligible = 0;
+    out.forEach((x: PointSource) => { eligible += x.points; });
+    const paid = Math.max(0, Math.floor(run.stats.legacyPaid ?? 0));
+    if (paid > 0) out.push(new PointSource('这个蜂群之前分蜂已领取', -Math.min(paid, eligible)));
+    return out;
+  }
+
+  private fill(p: SwarmPreview, kind: string): void {
+    p.sources = this.pointSources(kind);
+    let total = 0;
+    p.sources.forEach((x: PointSource) => { total += x.points; });
+    p.total = Math.max(0, total);
+  }
+
+  /** 原地分蜂：只需要一只新蜂后，带走当前蜂巢一半的资源和人口，在附近建立新蜂群 */
+  localPreview(): SwarmPreview {
+    const run = this.w.s.run;
+    const p = new SwarmPreview();
+    p.conditions.push(new SwarmCondition('queen', '可带队的新蜂后', run.colony.youngQueens, 1));
+    p.ready = p.conditions.every((c: SwarmCondition) => c.met);
+    this.fill(p, 'local');
+    p.resets = ['新蜂群从一座只有蜂后室的空蜂巢开始建设', '新蜂群有自己的花田、季节和篇章进度'];
+    p.keeps = ['你继续经营当前蜂群（保留另一半人口、资源和全部建设）', '新蜂群算作本种区的蜂群，可以随时切换过去经营',
+      '蜂王传承点、图鉴、成就和外观'];
+    return p;
+  }
+
+  /**
+   * 种区分蜂（远征副本）：原有的蜂群发展条件 + 出发地蜂群数量门槛。
+   * target 为空时按最容易的种区计算（用于篇章与提示）。
+   */
+  swarmPreview(target: string = ''): SwarmPreview {
+    const w = this.w;
+    const run = w.s.run;
     const sc = w.cfg.swarm;
     const p = new SwarmPreview();
-    const n = meta.swarmCount;
+    const n = this.zoneSwarms();
     const honeyTarget = Math.min(sc.honeyCap, sc.honeyBase * Math.pow(sc.honeyGrowth, n));
     let upgrades = 0;
     Object.keys(run.upgrades).forEach((k: string) => {
       upgrades += run.upgrades[k];
     });
     const discovered = run.map.fields.filter((f: FlowerField) => f.discovered && !f.home).length;
+    const targets = this.zoneTargets();
+    const chosen = targets.find((r: RegionDef) => r.id === target);
+    const need = chosen !== undefined ? this.zoneColoniesNeeded(chosen)
+      : Math.min(...targets.map((r: RegionDef) => this.zoneColoniesNeeded(r)));
+    p.conditions.push(new SwarmCondition('colonies', `${w.region().name}的蜂群数量${chosen !== undefined ? `（去${chosen.name}）` : ''}`,
+      this.regionColonies(), need));
     p.conditions.push(new SwarmCondition('pop', '蜂群数量', w.adults(), sc.popBase + sc.popPerSwarm * n));
     p.conditions.push(new SwarmCondition('upgrades', '巢房升级总等级', upgrades, sc.upgradeLevels + n * 4));
     p.conditions.push(new SwarmCondition('honey', '蜂蜜储备', Math.floor(w.econ.num(Res.Honey)), Math.round(honeyTarget)));
@@ -469,53 +563,32 @@ export class ProgressionService {
     }
     p.ready = p.conditions.every((c: SwarmCondition) => c.met);
     // 传承点：主要来自完成种区目标（设计文档10.6）
-    const region = w.region();
-    p.sources.push(new PointSource('种区完成基础奖励', sc.basePoints));
-    let eco = 0;
-    eco += Math.min(3, run.season.wintersSurvived) * 2;
-    eco += run.stats.rareFound > 0 ? 2 : 0;
-    eco += discovered >= run.map.fields.length - 2 ? 2 : 0;
-    eco += run.threats.cleared >= 10 ? 2 : 0;
-    eco += run.stats.pollinations >= 3 ? 2 : 0;
-    p.sources.push(new PointSource('生态目标奖励', eco));
-    p.sources.push(new PointSource(`难度奖励（${region.name}）`, region.difficulty * 4));
-    if (this.regionMastered(run.regionId)) p.sources.push(new PointSource('种区专属成就', 3));
-    if ((run.stats.raidWins ?? 0) > 0) p.sources.push(new PointSource('赢得蜂巢保卫战', 2));
-    const produced = run.produced[Res.Honey] === undefined ? BigNum.zero() : run.produced[Res.Honey];
-    const logBonus = Math.max(0, Math.floor(produced.log10()) - 2);
-    p.sources.push(new PointSource('累计产量（对数）', logBonus));
-    let subtotal = 0;
-    p.sources.forEach((s: PointSource) => {
-      subtotal += s.points;
-    });
-    // 剩余资源折算：最高占本次结算 20%（PROG-005）
-    const raw = Math.floor(Math.pow(Math.max(0, w.econ.num(Res.Honey)), 0.25) / 4);
-    const capRes = Math.floor(subtotal * sc.resourceBonusCap / (1 - sc.resourceBonusCap));
-    p.sources.push(new PointSource('剩余资源折算（上限20%）', Math.min(raw, capRes)));
-    let total = 0;
-    p.sources.forEach((s: PointSource) => {
-      total += s.points;
-    });
-    p.total = total;
+    this.fill(p, 'zone');
     p.resets = ['新蜂巢的建筑、属性等级与当前种区研究', '新蜂巢的花田探索与季节状态'];
     p.keeps = ['原蜂巢及其另一半人口与资源', '新蜂后带走的一半人口与当前资源', '蜂王传承点与天赋',
       '花种与敌害图鉴、成就、外观和设置'];
     return p;
   }
 
-  /** 写入分蜂结算到 meta（创建新种区由 Engine 完成） */
-  applySwarmToMeta(points: number, nextRegion: string): void {
+  /** 去某个种区的门槛是否已满足（只看蜂群数量） */
+  zoneUnlocked(region: RegionDef): boolean {
+    return this.regionColonies() >= this.zoneColoniesNeeded(region);
+  }
+
+  /** 写入分蜂结算到 meta（创建新蜂群由 Engine 完成） */
+  applySwarmToMeta(points: number, nextRegion: string, kind: string): void {
     const meta = this.w.s.meta;
     const run = this.w.s.run;
     const rec: SwarmRecord = {
       regionId: run.regionId, points: points, playTime: Math.round(run.time), peakPop: run.stats.peakPop,
-      endedAt: Math.round(meta.totalPlayTime)
+      endedAt: Math.round(meta.totalPlayTime), kind: kind, toRegion: nextRegion
     };
     meta.history.push(rec);
     meta.swarmCount += 1;
     meta.inheritance.totalPoints += points;
     meta.inheritance.available += points;
     meta.inheritance.unlocked = true;
+    run.stats.legacyPaid = Math.max(0, Math.floor(run.stats.legacyPaid ?? 0)) + points;
     if (meta.regionsVisited.indexOf(nextRegion) < 0) {
       meta.regionsVisited.push(nextRegion);
     }

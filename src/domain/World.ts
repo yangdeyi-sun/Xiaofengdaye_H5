@@ -527,6 +527,14 @@ export class World {
   onHatch: (role: string, count: number, star: boolean) => void = () => {};
   /** 具体某只蜜蜂的工作记录（侦察出航、发现花田、守卫击退），由 GameEngine 注入 */
   onBee: (kind: string, index: number, ref: string) => void = () => {};
+  /** 敌害咬死蜜蜂：扣减工种并从名册移除，返回名字（由 GameEngine 注入 RosterService.kill） */
+  onDeath: (role: string, n: number) => string[] = (role: string, n: number) => {
+    const have = this.role(role);
+    const k = Math.max(0, Math.min(have, Math.floor(n)));
+    this.s.run.colony.roles[role] = have - k;
+    this.s.run.colony.injured[role] = Math.min(this.injured(role), have - k);
+    return [];
+  };
   /** 孵化时判定是否额外诞生一只明星蜂，由 GameEngine 注入 */
   starRoll: () => boolean = () => false;
   /** 明星蜂加成，由 GameEngine 注入 */

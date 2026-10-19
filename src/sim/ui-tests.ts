@@ -91,6 +91,25 @@ check(ui.document.root.querySelector('.event-card') !== null, 'season event moda
 click('event-choose', 'forage');
 check(ui.document.root.querySelector('.event-card') === null && e.events.effects().length > 0, 'choosing an event option applies its effect');
 check(ui.document.root.querySelector('.kingdom-chip') !== null, 'kingdom level chip is in the top bar');
+// 分蜂面板：新蜂后分化卡、原地分蜂卡、种区门槛
+e.run.colony.larvae = 1; e.run.res.jelly = BigNum.of(20);
+controller.openPanel('swarm'); ui.draw();
+const swarmText = JSON.stringify(ui.document.root.textContent ?? '');
+check(ui.document.root.querySelectorAll<UiElement>('[data-action]').some((n) => n.dataset.action === 'rear-queen' && n.getAttribute('disabled') === null) &&
+  ui.document.root.querySelectorAll<UiElement>('[data-action]').some((n) => n.dataset.action === 'confirm-local-swarm') &&
+  swarmText.includes('原地分蜂') && swarmText.includes('开启条件'), 'swarm panel offers queen rearing, local swarm and zone gates');
+// 熊：警告弹窗只剩迎战与援军；迎战后顶部出现熊来袭条
+e.run.threats.active.push({ eventId: 'ui-bear', type: 'bear', targetId: 'hive', phase: 'warning', hp: 260, maxHp: 260, startedAt: e.run.time, endsAt: e.run.time + 60, postponed: 0, settled: false });
+const bearCtl = controller as unknown as { bearModal: boolean };
+bearCtl.bearModal = true; controller.refreshGame(true); ui.draw();
+const bearText = JSON.stringify(ui.document.root.textContent ?? '');
+check(ui.document.root.querySelector('.bear-card') !== null && bearText.includes('掀翻') && !bearText.includes('交付'), 'bear warning explains the stakes and drops the tribute option');
+click('bear-choice', 'ui-bear');
+check(e.threats.pendingBear()?.phase === 'active' && ui.document.root.querySelectorAll<UiElement>('[data-action]').some((n) => n.dataset.action === 'goto-bear'),
+  'defending makes the bear charge and shows the bear chip');
+controller.openPanel('eco'); ui.draw();
+check(JSON.stringify(ui.document.root.textContent ?? '').includes('敌害强度'), 'eco panel shows threat strength versus guards');
+e.run.threats.active = [];
 for (const panel of ['hub', 'queen', 'tasks', 'build', 'colony', 'cell', 'upgrade', 'field', 'eco', 'evolution', 'swarm', 'colonies', 'resources', 'codex', 'roster', 'settings']) {
   controller.openPanel(panel); ui.draw();
   check(ui.document.root.querySelector('.panel-frame > header h2')!.textContent !== '功能', `complete shared ${panel} panel is present`);

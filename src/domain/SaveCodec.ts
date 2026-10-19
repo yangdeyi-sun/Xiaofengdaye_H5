@@ -340,7 +340,7 @@ function repairRun(r: RunDTO): void {
   c.plan.reserve = Math.max(0, Math.min(0.9, num(c.plan.reserve, plan.reserve)));
   c.plan.larvae = Math.max(0, Math.min(c.larvae, Math.floor(num(c.plan.larvae, 0))));
   c.queenAttempts = Math.max(0, Math.floor(num(c.queenAttempts, 0)));
-  c.queenFails = Math.max(0, Math.min(3, Math.floor(num(c.queenFails ?? 0, 0))));
+  c.queenFails = Math.max(0, Math.min(60, Math.floor(num(c.queenFails ?? 0, 0))));
   c.luckyHatch = Math.max(0, Math.floor(num(c.luckyHatch ?? 0, 0)));
   if (!Array.isArray(c.roster)) c.roster = [];
   c.roster = c.roster.filter((b) => b !== null && typeof b === 'object' && typeof b.n === 'string' &&

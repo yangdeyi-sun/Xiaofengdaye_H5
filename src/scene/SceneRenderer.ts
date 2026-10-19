@@ -554,6 +554,12 @@ export class SceneRenderer {
       } else if (e.kind === 'swarm') {
         this.screenFx('atlas_vfx_16', 'swarm_arrive');
         this.addText('banner', 0, 0, e.text, '#FFFFFF', true, '');
+      } else if (e.kind === 'death') {
+        // 敌害咬死蜜蜂：在敌害位置飘一个红色的减员数字
+        this.addText(e.view === 'hive' ? 'hive' : 'field', e.x, e.view === 'hive' ? e.y - 0.5 : e.y - 26, e.text, '#FF8A80', true, '');
+      } else if (e.kind === 'fail') {
+        this.flashFail();
+        this.addText('banner', 0, 0, e.text, '#FFB4A8', true, '');
       }
     });
     this.eng.w.fx = [];
@@ -989,6 +995,14 @@ export class SceneRenderer {
 
   /** 镜头对准某个敌害（跳到敌害时用，胡蜂在航线中段而不在花田上） */
   lookAtThreat(eventId: string): boolean {
+    // 熊的位置随阶段变化（预警时走近、袭击时停在蜂箱旁），按当前状态现算，不用上一帧的标记
+    const bear = this.eng.run.threats.active.find((x: ThreatEvent) => x.eventId === eventId && x.type === ThreatType.Bear);
+    if (bear !== undefined) {
+      const p = this.bearPos(bear);
+      this.stopFollow();
+      this.lookAt(p[0], p[1] + 20);
+      return true;
+    }
     const m = this.marks.get(eventId);
     if (m === undefined || m.view !== 'field') return false;
     this.stopFollow();

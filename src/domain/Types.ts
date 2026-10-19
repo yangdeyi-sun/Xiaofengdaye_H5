@@ -333,10 +333,16 @@ export interface SwarmDef {
   minPollinations: number;
   basePoints: number;
   resourceBonusCap: number;
-  queenHoney: number;
-  queenWax: number;
+  /** 分化一只新蜂后：消耗 1 只幼虫 + 这么多蜂王浆 */
   queenJelly: number;
+  /** 新蜂后基础成功率 */
   queenSuccessChance: number;
+  /** 每连续失败一次，成功率增加多少 */
+  queenFailStep: number;
+  /** 同时最多等待带队的新蜂后数量 */
+  queenMaxWaiting: number;
+  /** 种区分蜂：出发地至少要有几个蜂群（难度再往上加） */
+  zoneMinColonies: number;
 }
 
 export interface GameConfigDef {

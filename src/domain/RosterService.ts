@@ -209,6 +209,38 @@ export class RosterService {
     if (codex.indexOf(t.id) < 0) codex.push(t.id);
   }
 
+  /**
+   * 敌害咬死某工种的 n 只蜜蜂：随机挑普通蜜蜂，明星蜂只有在没有普通蜜蜂时才会牺牲。
+   * 同时扣减工种数量与受伤数量，返回牺牲蜜蜂的名字（名册尚未建立时返回空）。
+   */
+  kill(role: string, n: number): string[] {
+    const colony = this.w.s.run.colony;
+    const have = Math.max(0, Math.floor(colony.roles[role] ?? 0));
+    const k = Math.max(0, Math.min(have, Math.floor(n)));
+    if (k <= 0) return [];
+    colony.roles[role] = have - k;
+    colony.injured[role] = Math.min(Math.max(0, colony.injured[role] ?? 0), colony.roles[role]);
+    const list = this.list();
+    const names: string[] = [];
+    for (let i = 0; i < k; i++) {
+      const plain: number[] = [];
+      const stars: number[] = [];
+      list.forEach((b: NamedBee, idx: number) => {
+        if (b.r !== role) return;
+        if (b.t === undefined) plain.push(idx);
+        else stars.push(idx);
+      });
+      const pool = plain.length > 0 ? plain : stars;
+      if (pool.length === 0) break;
+      const idx = pool[Math.floor(this.w.rng.next() * pool.length)];
+      names.push(list[idx].n);
+      list.splice(idx, 1);
+    }
+    this.starLen = -1;
+    this.roleLen = -1;
+    return names;
+  }
+
   /** 名册与各工种数量对齐：少了补新蜜蜂（如流浪蜂群加入），多了按年龄从老到少移除（饥饿、寿命） */
   sync(): void {
     const list = this.list();
