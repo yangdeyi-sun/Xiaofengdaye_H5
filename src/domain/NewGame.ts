@@ -4,7 +4,7 @@ import { ForageStrategy, GameConfigDef, GuardPriority, RegionDef, Res, Role, Sea
 import { buildHive } from './HiveService';
 import { emptyDaily } from './DailyService';
 import {
-  BreedPlan, ColonyState, FlowerField, GameState, InheritanceState, MapState, MetaState, RunState, RunStats, SeasonState,
+  BreedPlan, ColonyState, FlowerField, GameState, InheritanceState, KingdomState, MapState, MetaState, RunState, RunStats, SeasonState,
   SettingsState, ThreatState
 } from './State';
 
@@ -129,7 +129,7 @@ export function createRun(cfg: GameConfigDef, regionId: string, regionIndex: num
     larvae: startLarvae, roles: roles, injured: injured, batches: [], nextBatchId: 1, layCooldown: 0,
     autoLay: false, autoHatch: false, autoRatio: ratio, houseWaxShare: 0.25, forageStrategy: ForageStrategy.Balanced,
     pollinators: {}, guardPriority: GuardPriority.Balanced, eggsLaid: 0, hatched: 0, lifeDebt: 0, collapsed: false,
-    youngQueens: 0, queenAttempts: 0, plan: defaultBreedPlan()
+    youngQueens: 0, queenAttempts: 0, plan: defaultBreedPlan(), roster: [], queenFails: 0, luckyHatch: 0
   };
   const map: MapState = { fields: generateFields(cfg, region, rng), scouts: [], nextScoutId: 1 };
   const season: SeasonState = {
@@ -148,6 +148,10 @@ export function createRun(cfg: GameConfigDef, regionId: string, regionIndex: num
   return run;
 }
 
+export function emptyKingdom(): KingdomState {
+  return { level: 1, xp: 0, honeyMark: 0, starEggs: 0, honeyTotal: 0 };
+}
+
 export function createInitialState(cfg: GameConfigDef, playerId: string, now: number, seed: number): GameState {
   const inh: InheritanceState = { totalPoints: 0, available: 0, nodes: {}, presets: [], resets: 0, unlocked: false };
   const settings: SettingsState = {
@@ -161,7 +165,7 @@ export function createInitialState(cfg: GameConfigDef, playerId: string, now: nu
     playerId: playerId, createdAt: now, totalPlayTime: 0, swarmCount: 0, regionsVisited: [cfg.regions[0].id],
     codexFlowers: [], codexThreats: [], achievements: [], skins: ['classic'], inheritance: inh, settings: settings,
     tutorialStep: 0, tutorialDone: false, history: [], totalWinters: 0, featureUnlocks: [], introsSeen: [],
-    daily: emptyDaily()
+    daily: emptyDaily(), kingdom: emptyKingdom(), nameSeq: 0, starCodex: [], raidWins: 0
   };
   const gs: GameState = {
     meta: meta, run: createRun(cfg, cfg.regions[0].id, 0, seed, 0), activeColonyId: 'colony-0', colonies: [],

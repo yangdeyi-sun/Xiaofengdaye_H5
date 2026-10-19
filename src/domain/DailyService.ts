@@ -84,7 +84,7 @@ export class DailyService {
 
   private eligible(kind: string): boolean {
     const w = this.w;
-    if (kind === 'threat') return w.s.run.threats.enabled && w.role(Role.Guard) > 0;
+    if (kind === 'threat') return w.s.run.threats.enabled;
     if (kind === 'bloom') return w.s.meta.tutorialDone;
     if (kind === 'upgrade') return w.s.meta.tutorialDone;
     if (kind === 'hatch') return w.s.run.colony.eggsLaid > 0;

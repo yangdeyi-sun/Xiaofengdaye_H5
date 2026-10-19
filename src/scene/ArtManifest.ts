@@ -353,5 +353,33 @@ export function buildArtManifest(): Map<string, AtlasDef> {
     .add('leaves', 8, true, [0, 522, 522, 0, 782, 522, 0, 1042, 522, 0, 1302, 522, 0, 1562, 522, 0, 2, 782, 0, 262, 782, 0, 522, 782])
     .add('dust', 8, true, [0, 782, 782, 0, 1042, 782, 0, 1302, 782, 0, 1562, 782, 0, 2, 1042, 0, 262, 1042, 0, 522, 1042, 0, 782, 1042])
     .add('heat', 8, true, [0, 1042, 1042, 0, 1302, 1042, 0, 1562, 1042, 0, 2, 1302, 0, 262, 1302, 0, 522, 1302, 0, 782, 1302, 0, 1042, 1302]));
+  addStarOverlays(m);
   return m;
+}
+
+/** 明星蜂各特性所属工种（与 RosterService.STAR_TRAITS 一致） */
+export const STAR_ART_ROLE: Record<string, string> = {
+  lightning: 'forager', bigbelly: 'forager', nose: 'forager',
+  farsight: 'scout', gale: 'scout', lucky: 'scout',
+  brewer: 'house', mason: 'house', keeper: 'house',
+  iron: 'guard', sentinel: 'guard', medic: 'guard'
+};
+
+/**
+ * 明星蜂叠加图集（scripts/star-art 生成）：与对应工种图集页尺寸、帧位置、动画完全一致，
+ * 包围盒也沿用原图集，所以用同一组参数绘制就能逐帧对齐。
+ * atlas_star_wings_<工种>：金色翅膀；atlas_star_<特性>：跟随头部摆动的配饰。
+ */
+function addStarOverlays(m: Map<string, AtlasDef>): void {
+  const clone = (baseName: string, name: string): void => {
+    const base = m.get(baseName);
+    if (base === undefined) return;
+    const def = new AtlasDef(name, base.pages, base.pageW.slice(), base.tier, base.box.slice());
+    base.anims.forEach((anim: AnimDef, key: string) => {
+      def.add(key, anim.fps, anim.loop, anim.frames.slice());
+    });
+    m.set(name, def);
+  };
+  ['forager', 'scout', 'house', 'guard'].forEach((role: string) => clone(`atlas_bees_${role}`, `atlas_star_wings_${role}`));
+  Object.keys(STAR_ART_ROLE).forEach((trait: string) => clone(`atlas_bees_${STAR_ART_ROLE[trait]}`, `atlas_star_${trait}`));
 }

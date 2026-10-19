@@ -24,7 +24,9 @@ export const DOUYIN_AD_UNITS: AdUnitConfig = {
     colony_revive: '',
     swarm_bonus: '',
     spring_supply: '',
-    honey_topup: ''
+    honey_topup: '',
+    season_event: '',
+    lucky_hatch: ''
   },
   rewardedDefault: typeof __DOUYIN_REWARDED_ID__ !== 'undefined' ? __DOUYIN_REWARDED_ID__ : '',
   interstitial: typeof __DOUYIN_INTERSTITIAL_ID__ !== 'undefined' ? __DOUYIN_INTERSTITIAL_ID__ : ''

@@ -20,7 +20,9 @@ export const AdPlacement = {
   ColonyRevive: 'colony_revive',
   SwarmBonus: 'swarm_bonus',
   SpringSupply: 'spring_supply',
-  HoneyTopUp: 'honey_topup'
+  HoneyTopUp: 'honey_topup',
+  SeasonEvent: 'season_event',
+  LuckyHatch: 'lucky_hatch'
 } as const;
 
 export const AD_PLACEMENTS: AdPlacementDef[] = [
@@ -31,7 +33,9 @@ export const AD_PLACEMENTS: AdPlacementDef[] = [
   { id: AdPlacement.ColonyRevive, name: '蜂群重振', dailyLimit: 1, cooldownSec: 0 },
   { id: AdPlacement.SwarmBonus, name: '分蜂加成', dailyLimit: 3, cooldownSec: 0 },
   { id: AdPlacement.SpringSupply, name: '春季补给', dailyLimit: 3, cooldownSec: 0 },
-  { id: AdPlacement.HoneyTopUp, name: '补齐差额', dailyLimit: 6, cooldownSec: 60 }
+  { id: AdPlacement.HoneyTopUp, name: '补齐差额', dailyLimit: 6, cooldownSec: 60 },
+  { id: AdPlacement.SeasonEvent, name: '季节事件两全', dailyLimit: 6, cooldownSec: 0 },
+  { id: AdPlacement.LuckyHatch, name: '幸运孵化', dailyLimit: 3, cooldownSec: 0 }
 ];
 
 /** 奖励数值 */

@@ -60,6 +60,11 @@ let swarmed = 0;
 const maxT = argHours * 3600;
 let lastLog = 0;
 let pollinated = false;
+let evCount = 0;
+let lastRaid = '';
+const raidLog: string[] = [];
+let carriedAtSwarm = 0;
+const kLog: string[] = [];
 
 while (eng.run.time < maxT) {
   eng.step(0.1);
@@ -100,7 +105,7 @@ while (eng.run.time < maxT) {
   const queued = (role: string) => eng.run.colony.batches.filter((b) => b.targetRole === role).length;
   const count = (role: string) => w.role(role) + queued(role);
   const wanted = count(Role.House) < 1 ? Role.House : count(Role.Forager) < 1 ? Role.Forager :
-    count(Role.Scout) < 1 ? Role.Scout : eng.colony.roleAvailable(Role.Guard) && count(Role.Guard) < 2 ? Role.Guard :
+    count(Role.Scout) < 1 ? Role.Scout : eng.colony.roleAvailable(Role.Guard) && count(Role.Guard) < Math.max(2, Math.floor(w.adults() / 30)) ? Role.Guard :
     count(Role.Scout) < Math.max(1, Math.floor(w.adults() / 15)) ? Role.Scout :
     count(Role.House) < Math.max(1, Math.floor(w.adults() / 4)) ? Role.House : Role.Forager;
   const reserve = nextBuilding && w.count(nextBuilding) === 0 ? eng.hive.buildCost(nextBuilding)[0].amount.toNumber() : 0;
@@ -118,7 +123,9 @@ while (eng.run.time < maxT) {
   // 跟随引导的玩家：优先攒钱建关键巢房
   const keyNeeded = [Bld.Brewery, Bld.ForagerRoom, Bld.ScoutRoom, Bld.Storage, Bld.Nursery, Bld.GuardRoom, Bld.Evolution]
     .find((b) => w.count(b) === 0 && eng.hive.buildingAvailable(b));
-  const savingFor = keyNeeded ? eng.hive.buildCost(keyNeeded)[0].amount.toNumber() : 0;
+  let savingFor = keyNeeded ? eng.hive.buildCost(keyNeeded)[0].amount.toNumber() : 0;
+  // 仓库装不下下一座关键巢房时，先多建储蜜格，不要一直干等
+  if (savingFor > w.econ.capacity(Res.Honey).toNumber() * 0.9) { tryBuild(Bld.Storage); savingFor = 0; }
   if (sec % 5 === 0 && w.unlocked('t_first_forager') && w.econ.num(Res.Honey) > savingFor * 1.5) {
     let best: string | null = null;
     let bestCost = Infinity;
@@ -145,12 +152,38 @@ while (eng.run.time < maxT) {
   // 熊：防守
   const bear = eng.threats.pendingBear();
   if (bear && bear.phase === 'warning') eng.bearChoice(bear.eventId, 'defend');
+  // 新蜂后：其余分蜂条件（除资源外）都满足时开始培育（有保底，最多 4 次）
+  const pre = eng.swarmPreview();
+  if (eng.run.colony.youngQueens === 0 && w.unlocked('t_survive_winter') &&
+    pre.conditions.filter((c) => c.id !== 'queen' && c.id !== 'honey' && c.id !== 'jelly').every((c) => c.met) &&
+    w.econ.canAfford(eng.colony.queenCost())) {
+    eng.differentiateQueen();
+  }
+  // 季节事件：选第一个不需要广告的选项
+  const ev = eng.events.view();
+  if (ev !== null) {
+    const opt = ev.options.find((o) => !o.ad);
+    if (opt) {
+      const r = eng.events.choose(opt.id);
+      if (!r.ok) eng.events.dismiss();
+      evCount++;
+    }
+  }
+  const rp = eng.run.threats.raid?.phase ?? '';
+  if (rp !== lastRaid) {
+    if (rp === 'won' || rp === 'lost') raidLog.push(`${fmt(t)} ${rp} wave=${eng.run.threats.raid?.wave} kills=${eng.run.threats.raid?.kills} guards=${w.role(Role.Guard)} left=${eng.threats.raidView()?.left ?? 0}`);
+    lastRaid = rp;
+  }
+  if (sec % 1800 === 0) {
+    kLog.push(`${fmt(t)} 王国Lv${eng.kingdom.state().level} 明星蜂${eng.roster.stars().length} 名册${eng.roster.list().length}/${w.adults()} 篇章${eng.kingdom.chapter().index}/${eng.kingdom.chapter().total} 保卫战胜${eng.state.meta.raidWins ?? 0}`);
+  }
   // 分蜂
   const pv = eng.swarmPreview();
   if (pv.ready) {
     const r = eng.swarm(swarmed === 0 ? 'alpine' : 'meadow');
     if (r.ok) {
       swarmed++;
+      carriedAtSwarm = w.population();
       mark(`swarm_${swarmed}`);
       pollinated = false;
       if (swarmed === 1) {
@@ -172,6 +205,11 @@ while (eng.run.time < maxT) {
   }
 }
 
+console.log('\n保卫战');
+raidLog.slice(0, 12).forEach((line) => console.log(`  ${line}`));
+console.log('\n长期循环');
+kLog.forEach((line) => console.log(`  ${line}`));
+console.log(`  季节事件 ${evCount} 次 · 保卫战 ${eng.state.meta.raidWins ?? 0} 胜 · 王国 Lv${eng.kingdom.state().level} · 传承点 ${eng.state.meta.inheritance.totalPoints}`);
 // ---------- 验收 ----------
 interface Check { name: string; key: string; min: number; max: number; }
 const checks: Check[] = [
@@ -201,7 +239,8 @@ for (const c of checks) {
 // 不变量
 const negatives = Object.keys(eng.run.res).filter((k) => eng.run.res[k].isNegative());
 console.log(`  ${negatives.length === 0 ? 'PASS' : 'FAIL'}  资源非负`);
-console.log(`  ${w.population() <= w.popCap() + 2 ? 'PASS' : 'FAIL'}  人口不超上限 (${w.population()}/${w.popCap()})`);
+// 分蜂带过来的成年蜂可能超过新巢的初始上限（设计如此：扩建后才能继续产卵），这里只检查没有凭空多出来
+console.log(`  ${w.population() <= Math.max(w.popCap(), carriedAtSwarm) + 2 ? 'PASS' : 'FAIL'}  人口不超上限 (${w.population()}/${w.popCap()}，分蜂带来 ${carriedAtSwarm})`);
 console.log(`  ledger=${eng.state.ledger.length} messages=${eng.state.messages.length} swarms=${swarmed} region=${eng.run.regionId}`);
 if (negatives.length) fail++;
 void ThreatType;

@@ -27,6 +27,15 @@ class VisualBee {
   flip: boolean = false;
   anim: number = 0;
   carrying: boolean = false;
+  /** 对应名册里哪只采集蜂（-1 表示名册里没有） */
+  beeId: number = -1;
+}
+
+/** 巢内画面上画出的蜜蜂位置（屏幕坐标），用于点击命中 */
+class HiveSpot {
+  x: number = 0;
+  y: number = 0;
+  id: number = -1;
 }
 
 class FloatText {
@@ -146,9 +155,192 @@ export class SceneRenderer {
   /** 巢内视图顶部被界面占用的高度（像素） */
   hudTop: number = 0;
   private camAnim: number = 0;
+  /** 正在跟随的蜜蜂（名册编号，-1 表示没有） */
+  follow: number = -1;
+  /** 跟随的蜜蜂连续多久没出现在画面上（离开采集路线等） */
+  followMissing: number = 0;
+  private trail: number[] = [];
+  private trailAt: number = 0;
+  private hiveSpots: HiveSpot[] = [];
+  /** 巢内视图高亮的蜜蜂 */
+  highlight: number = -1;
 
   constructor(eng: GameEngine) {
     this.eng = eng;
+  }
+
+  /** 第 i 只画出来的某工种蜜蜂对应的名册编号（名册按工种缓存，不会每帧遍历整本名册） */
+  private beeIdAt(role: string, i: number): number {
+    const bees = this.eng.roster.displayOrder(role);
+    return bees.length > 0 ? bees[i % bees.length].id : -1;
+  }
+
+  /**
+   * 明星蜂：在原蜜蜂上用同一帧再画金色翅膀和特性配饰（scripts/star-art 生成的叠加图集），
+   * 原来的可爱形象完全保留；再加两颗一闪一闪的小星星。based=false 表示底图没画成（用的程序化回退）。
+   */
+  private drawStarBee(ctx: CanvasRenderingContext2D, role: string, id: number, anim: string, t: number, x: number, y: number,
+    size: number, o: DrawOpts, based: boolean): void {
+    if (id < 0) return;
+    const trait = this.eng.roster.traitOf(id);
+    if (trait.length === 0) return;
+    if (based) {
+      Sprites.draw(ctx, `atlas_star_wings_${role}`, anim, t, x, y, size, o);
+      Sprites.draw(ctx, `atlas_star_${trait}`, anim, t, x, y, size, o);
+    }
+    const k = size / 16;
+    for (let i = 0; i < 2; i++) {
+      const ph = this.time * 2.2 + id * 0.7 + i * 2.1;
+      const a = Math.max(0, Math.sin(ph));
+      if (a <= 0.05) continue;
+      const sx = x + (i === 0 ? -9 : 10) * k + Math.cos(ph * 0.5) * 2 * k;
+      const sy = y - (i === 0 ? 10 : 4) * k;
+      this.drawSparkle(ctx, sx, sy, (2.2 + a * 1.6) * k, a);
+    }
+  }
+
+  /** 四角小星光（与原素材里的高光星星同色） */
+  private drawSparkle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, alpha: number): void {
+    ctx.save();
+    ctx.globalAlpha = ctx.globalAlpha * alpha;
+    ctx.fillStyle = '#FFF2B3';
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.quadraticCurveTo(x, y, x, y + r);
+    ctx.quadraticCurveTo(x, y, x - r, y);
+    ctx.quadraticCurveTo(x, y, x, y - r);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** 第 i 只侦察实体对应的名册编号 */
+  private scoutBeeId(i: number): number {
+    return this.beeIdAt(Role.Scout, i);
+  }
+
+  /** 跟随中蜜蜂的世界坐标；不在画面上返回 null */
+  followPos(): number[] | null {
+    if (this.follow < 0) return null;
+    const v = this.bees.find((b: VisualBee) => b.beeId === this.follow && b.fieldId.length > 0);
+    if (v !== undefined) return [v.x, v.y];
+    const scouts = this.eng.run.map.scouts;
+    for (let i = 0; i < scouts.length; i++) {
+      const a = scouts[i];
+      if (this.scoutBeeId(i) === this.follow && a.state !== 'idle' && a.state !== 'dance') return [a.x, a.y];
+    }
+    return null;
+  }
+
+  /** 这只蜜蜂此刻在画面上能不能被跟随 */
+  canFollow(id: number): boolean {
+    const prev = this.follow;
+    this.follow = id;
+    const ok = this.followPos() !== null;
+    this.follow = prev;
+    return ok;
+  }
+
+  startFollow(id: number): void {
+    this.follow = id;
+    this.followMissing = 0;
+    this.trail = [];
+    this.camAnim = 0;
+  }
+
+  stopFollow(): void {
+    this.follow = -1;
+    this.trail = [];
+  }
+
+  /** 点中蜜蜂：花田视图找飞行中的采集蜂/侦察蜂（正在花丛上采蜜的不算，免得抢了采蜜的点击），巢内找画出的工蜂与守卫 */
+  hitBee(sx: number, sy: number, w: number, h: number, view: string): number {
+    let best = -1;
+    let bestD = 1e9;
+    if (view === 'hive') {
+      const r = Math.max(18, this.hexSize * 0.45);
+      this.hiveSpots.forEach((p: HiveSpot) => {
+        const d = Math.hypot(p.x - sx, p.y - sy);
+        if (d < r && d < bestD) { bestD = d; best = p.id; }
+      });
+      return best;
+    }
+    const wx = this.screenToWorldX(sx, w);
+    const wy = this.screenToWorldY(sy, h);
+    const r = Math.max(13, 18 / this.cam.zoom);
+    const consider = (x: number, y: number, id: number, fx: number, fy: number): void => {
+      if (id < 0) return;
+      if (Math.hypot(x - fx, y - fy) < 28 || Math.hypot(x, y + 12) < 50) return;
+      const d = Math.hypot(x - wx, y - wy);
+      if (d < r && d < bestD) { bestD = d; best = id; }
+    };
+    this.bees.forEach((b: VisualBee) => {
+      const f = this.eng.w.field(b.fieldId);
+      if (f !== null) consider(b.x, b.y, b.beeId, f.x, f.y);
+    });
+    this.eng.run.map.scouts.forEach((a, i: number) => {
+      if (a.state === 'idle' || a.state === 'dance') return;
+      consider(a.x, a.y, this.scoutBeeId(i), a.tx === a.x ? 1e6 : a.tx, a.ty);
+    });
+    return best;
+  }
+
+  private updateFollow(dt: number): void {
+    if (this.follow < 0) return;
+    const p = this.followPos();
+    if (p === null) {
+      this.followMissing += dt;
+      return;
+    }
+    this.followMissing = 0;
+    const k = Math.min(1, dt * 5);
+    this.cam.x += (p[0] - this.cam.x) * k;
+    this.cam.y += (p[1] - this.cam.y) * k;
+    this.cam.zoom += (Math.max(1.6, this.cam.zoom) - this.cam.zoom) * Math.min(1, dt * 3);
+    this.trailAt -= dt;
+    if (this.trailAt <= 0) {
+      this.trailAt = 0.08;
+      this.trail.push(p[0], p[1]);
+      if (this.trail.length > 120) this.trail.splice(0, this.trail.length - 120);
+    }
+  }
+
+  /** 跟随中的蜜蜂：飞过的轨迹 + 脚下光圈 + 要去的花田 */
+  private drawFollow(ctx: CanvasRenderingContext2D): void {
+    if (this.follow < 0) return;
+    const p = this.followPos();
+    if (this.trail.length >= 4) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,214,70,0.85)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 5]);
+      ctx.beginPath();
+      ctx.moveTo(this.trail[0], this.trail[1]);
+      for (let i = 2; i < this.trail.length; i += 2) ctx.lineTo(this.trail[i], this.trail[i + 1]);
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (p === null) return;
+    const v = this.bees.find((b: VisualBee) => b.beeId === this.follow);
+    const f = v === undefined ? null : this.eng.w.field(v.fieldId);
+    if (f !== null && v !== undefined) {
+      const goingOut = v.phase < 0.42;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([2, 6]);
+      ctx.beginPath();
+      ctx.moveTo(p[0], p[1]);
+      ctx.lineTo(goingOut ? f.x : 0, goingOut ? f.y : -10);
+      ctx.stroke();
+      ctx.restore();
+    }
+    const pulse = 13 + Math.sin(this.time * 6) * 2;
+    ctx.strokeStyle = '#FFD54A';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], pulse, 0, Math.PI * 2);
+    ctx.stroke();
   }
 
   // ------------------------------------------------------------ 更新
@@ -158,6 +350,7 @@ export class SceneRenderer {
     this.consumeFx();
     this.trackThreats();
     this.updateBees(d);
+    this.updateFollow(d);
     this.updateParticles(d);
     for (let i = this.texts.length - 1; i >= 0; i--) {
       const t = this.texts[i];
@@ -453,8 +646,9 @@ export class SceneRenderer {
         const f = eng.w.field(e.targetId);
         m.view = 'field';
         if (f !== null) {
-          m.x = e.type === ThreatType.Wasp ? f.x * 0.55 : f.x;
-          m.y = e.type === ThreatType.Wasp ? f.y * 0.55 : f.y;
+          const anchor = e.type === ThreatType.Wasp ? this.waspAnchor(e, f) : [f.x + 12, f.y - 8];
+          m.x = anchor[0];
+          m.y = anchor[1];
         }
       }
       if (isNew && e.phase !== 'postponed') {
@@ -540,6 +734,8 @@ export class SceneRenderer {
         idx++;
       }
     });
+    // 可见的采集蜂按顺序对应到名册里的采集蜂，点它就能看到是谁
+    this.bees.forEach((b: VisualBee, i: number) => { b.beeId = this.beeIdAt(Role.Forager, i); });
     const speedMul = this.reduceMotion ? 0.6 : 1;
     const watching = this.fieldVisible();
     this.bees.forEach((b: VisualBee) => {
@@ -744,6 +940,84 @@ export class SceneRenderer {
       }
     });
     return best;
+  }
+
+  /** 命中敌害：花田视图找胡蜂 / 蛛网 / 正在袭击的熊，蜂巢视图找蜡螟；返回 eventId */
+  hitThreat(sx: number, sy: number, w: number, h: number, view: string): string {
+    const eng = this.eng;
+    let best = '';
+    let bestD = 1e9;
+    if (view === 'hive') {
+      this.layoutHex(w, h);
+      const st = this.firstCellOf(Bld.Storage);
+      if (st === null) return '';
+      eng.threats.activeList().forEach((e: ThreatEvent) => {
+        if (e.type !== ThreatType.Moth || e.phase !== 'active') return;
+        const d = Math.hypot(this.cellX(st) - sx, this.cellY(st) - sy);
+        if (d < Math.max(30, this.hexSize * 1.1) && d < bestD) { bestD = d; best = e.eventId; }
+      });
+      return best;
+    }
+    const wx = this.screenToWorldX(sx, w);
+    const wy = this.screenToWorldY(sy, h);
+    const touch = Math.max(34, 28 / this.cam.zoom);
+    eng.threats.activeList().forEach((e: ThreatEvent) => {
+      if (e.phase !== 'active') return;
+      let x = 0;
+      let y = 0;
+      let r = touch;
+      if (e.type === ThreatType.Wasp || e.type === ThreatType.Web) {
+        const f = eng.w.field(e.targetId);
+        if (f === null) return;
+        const anchor = e.type === ThreatType.Wasp ? this.waspAnchor(e, f) : [f.x + 12, f.y - 8];
+        x = anchor[0];
+        y = anchor[1];
+        if (e.type === ThreatType.Wasp) r = touch + (e.boss === true ? 26 : 12);
+      } else if (e.type === ThreatType.Bear) {
+        const p = this.bearPos(e);
+        x = p[0];
+        y = p[1];
+        r = touch + 16;
+      } else {
+        return;
+      }
+      const d = Math.hypot(x - wx, y - wy);
+      if (d < r && d < bestD) { bestD = d; best = e.eventId; }
+    });
+    return best;
+  }
+
+  /** 镜头对准某个敌害（跳到敌害时用，胡蜂在航线中段而不在花田上） */
+  lookAtThreat(eventId: string): boolean {
+    const m = this.marks.get(eventId);
+    if (m === undefined || m.view !== 'field') return false;
+    this.stopFollow();
+    this.lookAt(m.x, m.y + 20);
+    return true;
+  }
+
+  /** 胡蜂所在位置：普通胡蜂在航线中段；保卫战的小兵错开一点，免得叠在一起 */
+  private waspAnchor(e: ThreatEvent, f: FlowerField): number[] {
+    const x = f.x * 0.55;
+    const y = f.y * 0.55;
+    if (e.raid !== true || e.boss === true) return [x, y];
+    const n = Number(e.eventId.replace(/\D/g, '')) || 0;
+    const a = n * 2.399;
+    return [x + Math.cos(a) * 34, y + Math.sin(a) * 22];
+  }
+
+  /** 拍打敌害的即时反馈：伤害数字 + 打击特效 */
+  swatFx(eventId: string, text: string, big: boolean = false): void {
+    const m = this.marks.get(eventId);
+    if (m === undefined) return;
+    if (m.view === 'hive') {
+      this.addText('hive', m.x, m.y - 0.7, text, '#FFE082', big, '');
+      this.shot('atlas_combat', 'impact', m.x, m.y, 0.9, 'hivecell');
+    } else {
+      this.addText('field', m.x, m.y - 30, text, '#FFE082', big, '');
+      this.shot('atlas_combat', 'impact', m.x, m.y - 4, 44, 'field');
+      for (let i = 0; i < 3; i++) this.spawnParticle('field', m.x, m.y, '#FFFFFF', 50, 1.6);
+    }
   }
 
   /** 命中还没探明的花田（带锁云朵），用于点击时给出说明 */
@@ -994,9 +1268,10 @@ export class SceneRenderer {
       }
       const anim = b.phase < 0.42 ? 'fly' : (b.phase < 0.58 ? 'collect' : 'loaded');
       bo.flip = b.flip;
-      if (!Sprites.draw(ctx, 'atlas_bees_forager', anim, b.anim, b.x, b.y, 15, bo)) {
-        drawBee(ctx, b.x, b.y, 0.85, b.angle, b.anim * 40, 'forager', b.carrying, detail);
-      } else if (status.length > 0 && statusShown < 6 && b.wob > 0.6) {
+      const based = Sprites.draw(ctx, 'atlas_bees_forager', anim, b.anim, b.x, b.y, 15, bo);
+      if (!based) drawBee(ctx, b.x, b.y, 0.85, b.angle, b.anim * 40, 'forager', b.carrying, detail);
+      this.drawStarBee(ctx, 'forager', b.beeId, anim, b.anim, b.x, b.y, 15, bo, based);
+      if (based && status.length > 0 && statusShown < 6 && b.wob > 0.6) {
         const st = new DrawOpts();
         st.full = true;
         Sprites.draw(ctx, 'atlas_bee_status', status, t, b.x, b.y, 22, st);
@@ -1004,16 +1279,18 @@ export class SceneRenderer {
       }
     });
     // 侦察蜂（逻辑实体位置）
-    eng.run.map.scouts.forEach((a: ScoutAgent) => {
+    eng.run.map.scouts.forEach((a: ScoutAgent, si: number) => {
       if (a.state === 'idle' || a.state === 'dance') {
         return;
       }
       bo.flip = a.tx < a.x;
       const anim = a.state === 'search' ? 'search' : 'fly';
-      if (!Sprites.draw(ctx, 'atlas_bees_scout', anim, t + a.id * 0.2, a.x, a.y, 17, bo)) {
+      const scoutBased = Sprites.draw(ctx, 'atlas_bees_scout', anim, t + a.id * 0.2, a.x, a.y, 17, bo);
+      if (!scoutBased) {
         const ang = Math.atan2(a.ty - a.y, a.tx - a.x);
         drawBee(ctx, a.x, a.y, 0.95, ang, t * 45 + a.id, 'scout', false, detail);
       }
+      this.drawStarBee(ctx, 'scout', this.scoutBeeId(si), anim, t + a.id * 0.2, a.x, a.y, 17, bo, scoutBased);
       if (a.state === 'search') {
         ctx.strokeStyle = 'rgba(93,173,226,0.7)';
         ctx.lineWidth = 1.5;
@@ -1022,6 +1299,7 @@ export class SceneRenderer {
         ctx.stroke();
       }
     });
+    this.drawFollow(ctx);
     // 敌害
     this.drawFieldThreats(ctx);
     // 一次性特效
@@ -1251,6 +1529,8 @@ export class SceneRenderer {
       if (!Sprites.draw(ctx, 'atlas_enemies_web', wa, t, wx, wy, 40, wo)) {
         drawWeb(ctx, wx, wy, 18);
       }
+      const webEv = eng.threats.activeList().find((x: ThreatEvent) => x.type === ThreatType.Web && x.targetId === f.fieldId);
+      if (webEv !== undefined && webEv.maxHp > 0) this.drawHpBar(ctx, wx, wy - 26, webEv.hp / webEv.maxHp);
       if (guarded) {
         for (let i = 0; i < 2; i++) {
           const ga = t * 2.4 + i * Math.PI;
@@ -1393,20 +1673,24 @@ export class SceneRenderer {
         if (f === null) {
           return;
         }
-        const cx = f.x * 0.55;
-        const cy = f.y * 0.55;
+        const anchor = this.waspAnchor(e, f);
+        const cx = anchor[0];
+        const cy = anchor[1];
         const fighting = eng.w.active(Role.Guard) > 0;
-        for (let i = 0; i < 2; i++) {
-          const a = t * 1.8 + i * Math.PI;
-          const px = cx + Math.cos(a) * 30;
-          const py = cy + Math.sin(a) * 18;
+        const boss = e.boss === true;
+        const count = boss || e.raid === true ? 1 : 2;
+        for (let i = 0; i < count; i++) {
+          const a = t * (boss ? 0.9 : 1.8) + i * Math.PI;
+          const px = cx + Math.cos(a) * (boss ? 12 : 30);
+          const py = cy + Math.sin(a) * (boss ? 8 : 18);
           o.flip = Math.sin(a) > 0;
           const anim = (Math.floor(t * 0.7 + i) % 3 === 0) ? 'dash' : 'hover';
-          if (!Sprites.draw(ctx, 'atlas_enemies_wasp', anim, t + i, px, py, 22, o)) {
-            drawWasp(ctx, px, py, 1.3, a + Math.PI / 2, t * 50);
+          if (!Sprites.draw(ctx, 'atlas_enemies_wasp', anim, t + i, px, py, boss ? 48 : 22, o)) {
+            drawWasp(ctx, px, py, boss ? 2.8 : 1.3, a + Math.PI / 2, t * 50);
           }
+          if (boss) this.drawCrown(ctx, px, py - 30);
         }
-        this.drawHpBar(ctx, cx, cy - 34, e.hp / e.maxHp);
+        this.drawHpBar(ctx, cx, cy - (boss ? 52 : 34), e.hp / e.maxHp);
         const g = Math.min(4, Math.ceil(eng.w.active(Role.Guard) / 3));
         for (let i = 0; i < g; i++) {
           const a = -t * 2.2 + i / Math.max(1, g) * Math.PI * 2;
@@ -1460,6 +1744,24 @@ export class SceneRenderer {
         }
       }
     });
+  }
+
+  /** 胡蜂王头上的小王冠 */
+  private drawCrown(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+    ctx.fillStyle = '#FFD54A';
+    ctx.strokeStyle = '#8C5A00';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(x - 10, y + 5);
+    ctx.lineTo(x - 10, y - 3);
+    ctx.lineTo(x - 5, y + 1);
+    ctx.lineTo(x, y - 6);
+    ctx.lineTo(x + 5, y + 1);
+    ctx.lineTo(x + 10, y - 3);
+    ctx.lineTo(x + 10, y + 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
   }
 
   private drawHpBar(ctx: CanvasRenderingContext2D, x: number, y: number, ratio: number): void {
@@ -1764,6 +2066,7 @@ export class SceneRenderer {
     const t = this.time;
     this.hiveShownAt = t;
     this.handDrawn = false;
+    this.hiveSpots = [];
     this.layoutHex(w, h);
     const S = this.hexSize;
     const hexW = S * HEX_W;
@@ -2128,9 +2431,27 @@ export class SceneRenderer {
         anim = 'idle';
       }
       o.flip = Math.cos(t * 0.8 + i * 1.7) < 0;
-      if (!Sprites.draw(ctx, 'atlas_bees_house', anim, t + i * 0.3, px, py, S * 0.42, o)) {
-        drawBee(ctx, px, py, S / 34, o.flip ? Math.PI : 0, t * 50 + i, 'house', false, S > 26);
-      }
+      const houseId = this.beeIdAt(Role.House, i);
+      this.addHiveSpot(ctx, px, py, houseId, S);
+      const houseBased = Sprites.draw(ctx, 'atlas_bees_house', anim, t + i * 0.3, px, py, S * 0.42, o);
+      if (!houseBased) drawBee(ctx, px, py, S / 34, o.flip ? Math.PI : 0, t * 50 + i, 'house', false, S > 26);
+      this.drawStarBee(ctx, 'house', houseId, anim, t + i * 0.3, px, py, S * 0.42, o, houseBased);
+    }
+  }
+
+  private addHiveSpot(ctx: CanvasRenderingContext2D, x: number, y: number, id: number, S: number): void {
+    if (id < 0) return;
+    const p = new HiveSpot();
+    p.x = x;
+    p.y = y;
+    p.id = id;
+    this.hiveSpots.push(p);
+    if (id === this.highlight) {
+      ctx.strokeStyle = '#FFD54A';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(x, y, S * 0.36 + Math.sin(this.time * 6) * 2, 0, Math.PI * 2);
+      ctx.stroke();
     }
   }
 
@@ -2150,10 +2471,12 @@ export class SceneRenderer {
       o.flip = Math.cos(a) < 0;
       const px = this.cellX(g) + Math.cos(a) * S * 0.9;
       const py = this.cellY(g) + Math.sin(a) * S * 0.5 + S * 0.3;
-      if (!Sprites.draw(ctx, 'atlas_bees_guard', alert ? (eng.w.mothActive ? 'attack' : 'alert') : 'patrol', t + i * 0.3,
-        px, py, S * 0.42, o)) {
-        drawBee(ctx, px, py, S / 34, a + Math.PI / 2, t * 50 + i, 'guard', false, S > 26);
-      }
+      const guardId = this.beeIdAt(Role.Guard, i);
+      this.addHiveSpot(ctx, px, py, guardId, S);
+      const guardAnim = alert ? (eng.w.mothActive ? 'attack' : 'alert') : 'patrol';
+      const guardBased = Sprites.draw(ctx, 'atlas_bees_guard', guardAnim, t + i * 0.3, px, py, S * 0.42, o);
+      if (!guardBased) drawBee(ctx, px, py, S / 34, a + Math.PI / 2, t * 50 + i, 'guard', false, S > 26);
+      this.drawStarBee(ctx, 'guard', guardId, guardAnim, t + i * 0.3, px, py, S * 0.42, o, guardBased);
     }
   }
 

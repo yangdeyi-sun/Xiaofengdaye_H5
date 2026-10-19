@@ -11,6 +11,9 @@ import { ThreatService } from './ThreatService';
 import { DailyService } from './DailyService';
 import { ProgressionService, SwarmPreview } from './ProgressionService';
 import { createRun } from './NewGame';
+import { RosterService, starTrait } from './RosterService';
+import { KingdomService } from './KingdomService';
+import { EventService } from './EventService';
 import { cloneState } from './SaveCodec';
 
 export class UpgradePreview {
@@ -39,6 +42,9 @@ export class GameEngine {
   threats: ThreatService;
   prog: ProgressionService;
   daily: DailyService;
+  roster: RosterService;
+  kingdom: KingdomService;
+  events: EventService;
   rateView: Rates = new Rates();
   dirty: boolean = false;
   /** 关键操作后请求保存（SAVE-005） */
@@ -48,6 +54,7 @@ export class GameEngine {
   };
   private acc: number = 0;
   private secTimer: number = 0;
+  private lastSpan: number = 1;
   private seasonLog: string[] = [];
 
   constructor(cfg: GameConfigDef, state: GameState) {
@@ -60,8 +67,35 @@ export class GameEngine {
     this.prod = new ProductionService(this.w);
     this.season = new SeasonService(this.w);
     this.threats = new ThreatService(this.w);
+    this.threats.honeyPerSec = () => this.estimateHoneyPerMin() / 60;
+    this.roster = new RosterService(this.w);
+    this.kingdom = new KingdomService(this.w);
+    this.events = new EventService(this.w);
+    const hps = (): number => this.estimateHoneyPerMin() / 60;
+    this.roster.honeyPerSec = hps;
+    this.kingdom.honeyPerSec = hps;
+    this.events.honeyPerSec = hps;
+    this.kingdom.swarmReady = () => this.prog.swarmPreview().ready;
+    this.events.busy = () => this.threats.raidActive();
+    this.events.publish = (fieldId: string) => this.map.publishDiscovery(fieldId);
+    this.w.onHatch = (role: string, count: number, star: boolean) => {
+      const b = this.roster.born(role, count, star);
+      if (star && b !== null && b.t !== undefined) {
+        const t = starTrait(b.t);
+        this.w.gainXp(20);
+        this.w.msg('milestone', `明星蜂诞生！${this.w.roleDef(role).name}「${b.n}」带着「${t === null ? '' : t.name}」特性：全巢${t === null ? '' : t.desc} +${t === null ? '' : this.roster.bonusText(t, 1)}`);
+        this.w.emit('hatch', 0, 0, `明星蜂「${b.n}」`, 'hive');
+      }
+    };
+    this.w.onBee = (kind: string, index: number, ref: string) => {
+      if (kind === 'guardWin') this.roster.onGuardWin(ref);
+      else this.roster.onScout(kind, index);
+    };
+    this.w.starRoll = () => this.roster.rollStar();
+    this.w.starBonus = (stat: string) => this.roster.bonus(stat);
     this.prog = new ProgressionService(this.w);
     this.daily = new DailyService(this.w, () => this.estimateHoneyPerMin() / 60);
+    this.prog.researchBonus = () => this.kingdom.researchBonus();
     this.season.onChange = (from: string, to: string) => {
       this.map.onSeasonChange();
       this.seasonLog.push(to);
@@ -110,6 +144,7 @@ export class GameEngine {
       const span = Math.max(dt, this.secTimer);
       this.secTimer = 0;
       this.publishRates(span);
+      this.lastSpan = span;
       this.periodic();
     }
     this.dirty = true;
@@ -132,7 +167,12 @@ export class GameEngine {
 
   /** 每秒执行的低频系统（时间片轮询） */
   private periodic(): void {
+    this.roster.sync();
+    this.roster.attribute(this.lastSpan, this.rateView);
+    this.kingdom.tick(this.lastSpan, this.rateView);
+    this.events.tick();
     this.w.attrs.recompute();
+    if (this.kingdom.checkChapters().length > 0) this.saveRequested = true;
     this.prog.checkTasks();
     this.prog.newlyDone.forEach((id: string) => {
       this.onTaskDone(id);
@@ -321,6 +361,13 @@ export class GameEngine {
     return this.done(this.threats.bearChoice(eventId, choice));
   }
 
+  /** 玩家点击敌害：亲手驱赶 */
+  swatThreat(eventId: string): CmdResult {
+    const r = this.threats.swat(eventId);
+    if (r.ok && r.message.startsWith('亲手击退')) this.saveRequested = true;
+    return r;
+  }
+
   claimOverflow(): CmdResult {
     const n = this.w.econ.claimOverflow();
     return n > 0 ? this.done(CmdResult.ok(`收回 ${Math.round(n)} 溢出资源`)) : CmdResult.fail('ECON_FULL', '仓库仍然已满');
@@ -413,6 +460,9 @@ export class GameEngine {
         carriedInjured[role] = Math.min(carriedRoles[role], Math.floor(snapshotRun.colony.injured[role] * 0.5));
         snapshotRun.colony.injured[role] -= carriedInjured[role];
       });
+      // 名册：明星蜂优先跟随新蜂后，其余按名字隔一只带走一只
+      const rosterSplit = this.roster.split(snapshotRun.colony.roster ?? [], carriedRoles);
+      snapshotRun.colony.roster = rosterSplit.stay;
       const carriedLarvae = Math.floor(snapshotRun.colony.larvae * 0.5);
       snapshotRun.colony.larvae -= carriedLarvae;
       const carriedBatches: LarvaBatch[] = [];
@@ -448,6 +498,7 @@ export class GameEngine {
         run.colony.injured[role] = carriedInjured[role];
       });
       run.colony.larvae += carriedLarvae;
+      run.colony.roster = rosterSplit.go;
       run.colony.batches = carriedBatches;
       run.colony.nextBatchId = carriedBatches.length + 1;
       run.colony.hatched = Object.values(carriedRoles).reduce((sum, value) => sum + value, 0);
@@ -460,7 +511,8 @@ export class GameEngine {
       this.w.refreshFlags();
       this.hive.recomputeAdjacency();
       this.w.attrs.recompute();
-      this.w.msg('swarm', `分蜂完成！新蜂后带领一半蜂群和资源抵达${this.w.region().name}，获得 ${points} 传承点。新巢建设与升级成本为上一代的2倍。`);
+      this.w.gainXp(100);
+      this.w.msg('swarm', `分蜂完成！新蜂后带领一半蜂群和资源抵达${this.w.region().name}，获得 ${points} 传承点（全巢产量永久 +${points * 2}%）。新巢成本倍率 ×${this.hive.constructionCostMul()}。`);
       this.w.emit('swarm', 0, 0, this.w.region().name, 'any');
       this.saveRequested = true;
       return CmdResult.ok(`获得 ${points} 传承点`);

@@ -61,7 +61,37 @@ e.hive.recomputeAdjacency(); e.w.attrs.recompute(); e.run.res.honey = BigNum.of(
 const controller = ui.controller as unknown as { openPanel(panel: string): void; introId: string; refreshGame(force: boolean): void; selectedCell: string; selectedField: string; upgradeBuilding: string; };
 controller.introId = ''; controller.selectedCell = available.find((cell) => cell.building === Bld.Brewery)!.cellId;
 controller.selectedField = e.run.map.fields[0].fieldId; controller.upgradeBuilding = Bld.Brewery;
-for (const panel of ['hub', 'queen', 'tasks', 'build', 'colony', 'cell', 'upgrade', 'field', 'eco', 'evolution', 'swarm', 'colonies', 'resources', 'codex', 'settings']) {
+e.run.threats.enabled = true; e.run.threats.streak = 2;
+e.run.threats.active.push({ eventId: 'ui-wasp', type: 'wasp', targetId: e.run.map.fields[0].fieldId, phase: 'active', hp: 20, maxHp: 40, startedAt: 0, endsAt: 1e6, postponed: 0, settled: false });
+controller.openPanel('eco'); ui.draw();
+check(ui.document.root.querySelectorAll<UiElement>('[data-action]').some((n) => n.dataset.action === 'goto-threat' && n.dataset.id === 'ui-wasp'), 'eco panel offers a go-to button for an active threat');
+check(JSON.stringify(ui.document.root.textContent ?? '').includes('连续击退 2 次'), 'eco panel shows the clear streak');
+e.run.threats.active = [];
+// 名册、蜜蜂信息卡、季节事件弹窗、王国小标在完整界面宿主里都能渲染与操作
+e.step(1.05);
+const firstBee = e.roster.list()[0];
+check(firstBee !== undefined, 'roster has named bees in the full UI host');
+const ctl = controller as unknown as { beeCard: number; eventModal: boolean };
+ctl.beeCard = firstBee.id; controller.refreshGame(true); ui.draw();
+check(ui.document.root.querySelector('.bee-card') !== null && JSON.stringify(ui.document.root.textContent ?? '').includes(firstBee.n), 'bee card shows the bee name');
+check((ui.document.root.querySelector<UiElement>('.bee-card .bee-portrait')?.getAttribute('src') ?? '').endsWith(`bee_${firstBee.r}.webp`),
+  'bee card shows the original cute bee portrait for a normal bee');
+firstBee.t = 'lightning'; firstBee.lv = 1;
+controller.refreshGame(true); ui.draw();
+check((ui.document.root.querySelector<UiElement>('.bee-card .bee-portrait.star')?.getAttribute('src') ?? '').endsWith('star_lightning.webp'),
+  'bee card shows the star bee portrait');
+delete firstBee.t; delete firstBee.lv;
+click('bee-close');
+check(ui.document.root.querySelector('.bee-card') === null, 'bee card closes');
+e.run.season.formal = true; e.run.season.season = 'summer';
+e.run.season.event = { id: 'pollen', key: 'ui', until: e.run.time + 100, resolved: false };
+controller.refreshGame(true); ui.draw();
+click('open-event');
+check(ui.document.root.querySelector('.event-card') !== null, 'season event modal opens from the event chip');
+click('event-choose', 'forage');
+check(ui.document.root.querySelector('.event-card') === null && e.events.effects().length > 0, 'choosing an event option applies its effect');
+check(ui.document.root.querySelector('.kingdom-chip') !== null, 'kingdom level chip is in the top bar');
+for (const panel of ['hub', 'queen', 'tasks', 'build', 'colony', 'cell', 'upgrade', 'field', 'eco', 'evolution', 'swarm', 'colonies', 'resources', 'codex', 'roster', 'settings']) {
   controller.openPanel(panel); ui.draw();
   check(ui.document.root.querySelector('.panel-frame > header h2')!.textContent !== '功能', `complete shared ${panel} panel is present`);
   check(ui.document.root.querySelector('.panel-scroll')!.rect.height > 100, `${panel} panel has a usable scroll viewport`);
@@ -90,7 +120,7 @@ for (const [width, height] of [[320, 568], [390, 844], [844, 390], [1024, 768], 
 ui.resize(viewport);
 let pans = 0, zoom = 1;
 const destination = available.find((cell) => !cell.building)!;
-session.renderer = { fitDefault() {}, drawField() {}, drawHive() {}, hitField: () => e.run.map.fields[0].fieldId,
+session.renderer = { fitDefault() {}, drawField() {}, drawHive() {}, hitField: () => e.run.map.fields[0].fieldId, hitThreat: () => '', swatFx() {}, hitBee: () => -1, follow: -1, highlight: -1, stopFollow() {}, startFollow() {}, canFollow: () => false, followPos: () => null,
   hitCell: () => destination.cellId, pan: () => { pans++; }, zoomBy: (factor: number) => { zoom *= factor; },
   panHive() {}, zoomHiveBy() {}, selectedCell: '', selectedField: '', focus: '' } as unknown as SceneRenderer;
 const settle = (): void => { for (const node of ui.document.root.querySelectorAll<UiElement>('*')) node.transitionFrom = null; ui.draw(); };

@@ -11,6 +11,11 @@ import { GameEngine } from '../domain/GameEngine';
 import { buildHive } from '../domain/HiveService';
 import { decodeEnvelope, encodeEnvelope, toDTO, SaveEnvelope } from '../domain/SaveCodec';
 import { Bld, Res, Role, ThreatPhase, ThreatType } from '../domain/Types';
+import { PresentationQueue } from '../app/PresentationQueue';
+import { costMulFor } from '../domain/HiveService';
+import { beeName, namePoolSize } from '../domain/BeeNames';
+import { STAR_TRAITS } from '../domain/RosterService';
+import { legacyAura } from '../domain/World';
 import { Guide, INTRO_TOPICS } from '../domain/Guide';
 import { softExponent } from '../domain/World';
 
@@ -294,9 +299,9 @@ while (queenEngine.run.colony.youngQueens === 0 && queenTries < 20) {
   queenTries += 1;
   queenEngine.differentiateQueen();
 }
-ok(queenEngine.run.colony.youngQueens === 1 && queenEngine.run.colony.queenAttempts === queenTries &&
-  Math.abs(queenEngine.w.econ.num(Res.Honey) - (50000 - queenTries * 1000)) < 1e-6,
-  'queen differentiation uses fixed resources and deterministic 25% attempts',
+ok(queenEngine.run.colony.youngQueens === 1 && queenEngine.run.colony.queenAttempts === queenTries && queenTries <= 4 &&
+  Math.abs(queenEngine.w.econ.num(Res.Honey) - (50000 - queenTries * 1000 + (queenTries - 1) * 500)) < 1e-6,
+  'queen rearing refunds half on failure and is guaranteed by the 4th attempt',
   `${queenEngine.run.colony.youngQueens}/${queenEngine.run.colony.queenAttempts}/${queenTries}/${queenEngine.w.econ.num(Res.Honey)}`);
 eng4.state.meta.swarmCount = 50;
 const eased = eng4.swarmPreview();
@@ -342,7 +347,8 @@ ok(Object.keys(e5.run.upgrades).length === 0 && Object.keys(e5.run.research).len
 ok(e5.state.colonies.length === 1 && e5.state.colonies[0].run.colony.roles[Role.Forager] === 100 &&
   Math.abs(e5.run.res[Res.Honey].toNumber() - e5.state.colonies[0].run.res[Res.Honey].toNumber()) < 1e-6,
   'swarm splits adults and current resources equally while preserving original colony');
-ok(e5.hive.constructionCostMul() === 2, 'new hive construction and upgrades cost twice the previous generation');
+ok(e5.hive.constructionCostMul() === costMulFor(1, 3) && e5.hive.constructionCostMul() > 2 && e5.hive.constructionCostMul() < 4,
+  'new hive cost multiplier follows generation and region difficulty', `${e5.hive.constructionCostMul()}`);
 const multiSave = decodeEnvelope(encodeEnvelope(e5.state, DEFAULT_CONFIG.configVersion, 6000));
 ok(multiSave.ok && multiSave.state?.colonies.length === 1 && multiSave.state.colonies[0].run.res[Res.Honey] instanceof BigNum,
   'multi-colony save roundtrip preserves BigNum resources');
@@ -613,6 +619,203 @@ if (legacyState !== null) {
   ok(decodeSaveCode(`  请保存：${code}  `) === env, 'save code tolerates surrounding text');
   ok(decodeSaveCode('XFDY1-AAAA') !== env && !decodeEnvelope(decodeSaveCode('XFDY1-AAAA') ?? '').ok, 'damaged save code is rejected');
   ok(decodeSaveCode('hello') === null, 'random text is not a save code');
+}
+
+// ---------- 2026-10-19 敌害节奏、奖励、亲手驱赶与提示队列 ----------
+{
+  const ts = createInitialState(DEFAULT_CONFIG, 'threat-tap', 0, 31);
+  ts.meta.tutorialDone = true;
+  const te = new GameEngine(DEFAULT_CONFIG, ts);
+  te.run.threats.enabled = true;
+  te.run.threats.nextSpawnAt = te.run.time + 400;
+  te.step(0.1);
+  ok(te.run.threats.nextSpawnAt > te.run.time + 300, 'formal-phase spawn timer is no longer clamped to under a minute every tick');
+  const f = te.run.map.fields[0];
+  f.webbed = true;
+  te.run.threats.nextSpawnAt = 1e9;
+  te.run.threats.active.push({ eventId: 'tap1', type: ThreatType.Web, targetId: f.fieldId,
+    phase: ThreatPhase.Active, hp: 30, maxHp: 30, startedAt: 0, endsAt: 0, postponed: 0, settled: false });
+  const honey0 = te.w.econ.num(Res.Honey);
+  let taps = 0;
+  let last = '';
+  while (taps < 20 && te.threats.activeList().length > 0) { te.step(0.2); last = te.swatThreat('tap1').message; taps++; }
+  ok(te.threats.activeList().length === 0 && !f.webbed && taps <= 7, 'a few taps clear a web by hand', `${taps} taps`);
+  ok(last.startsWith('亲手击退') && te.w.econ.num(Res.Honey) > honey0, 'hand clear pays honey', last);
+  ok((te.run.threats.streak ?? 0) === 1 && (te.run.threats.swats ?? 0) >= taps, 'streak and swat counters advance');
+  te.threats.honeyPerSec = () => 100;
+  const big = te.threats.rewardFor(ThreatType.Wasp, false).find((r) => r.res === Res.Honey)?.amount ?? 0;
+  const mine = te.threats.rewardFor(ThreatType.Wasp, true).find((r) => r.res === Res.Honey)?.amount ?? 0;
+  ok(big >= 2000 && mine > big, 'threat reward scales with hive production and hand kills earn more', `${big}/${mine}`);
+  te.run.threats.streak = 4;
+  const jelly0 = te.w.econ.num(Res.Jelly);
+  te.run.threats.active.push({ eventId: 'tap2', type: ThreatType.Wasp, targetId: f.fieldId,
+    phase: ThreatPhase.Active, hp: 1, maxHp: 40, startedAt: te.run.time, endsAt: te.run.time + 150, postponed: 0, settled: false });
+  te.step(0.2); te.swatThreat('tap2');
+  ok(te.w.econ.num(Res.Jelly) >= jelly0 + 1 - 1e-9, 'every fifth consecutive clear grants royal jelly');
+  ok(te.swatThreat('tap2').ok === false, 'a cleared threat cannot be paid twice');
+}
+{
+  const q = new PresentationQueue();
+  q.enqueue({ key: 'a', text: 'old', kind: 'threat', duration: 1000, createdAt: 0, ttl: 5000 });
+  ok(q.tick(60000, false) === null, 'stale notices expire instead of popping up late');
+  q.enqueue({ key: 'b', text: 'w1', kind: 'threat', duration: 1000, createdAt: 60000, ttl: 5000 });
+  q.enqueue({ key: 'c', text: 'w2', kind: 'threat', duration: 1000, createdAt: 60000, ttl: 5000 });
+  ok(q.tick(60001, false)?.text === 'w2' && q.tick(61500, false) === null, 'only the newest threat notice is kept');
+}
+
+// ---------- 2026-10-19 后期循环：名册、明星蜂、王国、篇章、季节事件、保卫战、传承加成 ----------
+{
+  // 名字：名字池够大，前 3000 只蜜蜂不重名
+  const names = new Set<string>();
+  for (let i = 0; i < 3000; i++) names.add(beeName(i, 123));
+  ok(namePoolSize() > 1000 && names.size === 3000, 'bee names are unique across thousands of bees', `${namePoolSize()}`);
+
+  const rs = createInitialState(DEFAULT_CONFIG, 'roster', 0, 41);
+  rs.meta.tutorialDone = true;
+  const re = new GameEngine(DEFAULT_CONFIG, rs);
+  re.run.colony.roles[Role.Forager] = 6;
+  re.run.colony.roles[Role.House] = 3;
+  re.step(1.05);
+  ok(re.roster.byRole(Role.Forager).length === 6 && re.roster.byRole(Role.House).length === 3, 'roster follows role counts');
+  ok(new Set(re.roster.list().map((b) => b.n)).size === re.roster.list().length, 'every bee in the roster has a different name');
+  re.run.colony.roles[Role.Forager] = 4;
+  re.step(1.05);
+  ok(re.roster.byRole(Role.Forager).length === 4, 'roster drops bees when the colony shrinks');
+  // 孵化：记录出生季节；明星蜂卵必出明星蜂，并给全巢加成
+  re.run.season.cycleIndex = 2;
+  re.run.season.season = 'summer';
+  const carryBefore = re.w.attrs.get('forager.carry');
+  re.kingdom.state().starEggs = 1;
+  const cell = re.run.hive.cells.find((c) => c.unlocked && c.building === '');
+  if (cell) cell.building = Bld.ForagerRoom;
+  re.run.colony.larvae = 1;
+  re.run.res[Res.Honey] = BigNum.of(1e6);
+  re.differentiate(Role.Forager, 1);
+  for (let i = 0; i < 400 && re.roster.stars().length === 0; i++) re.step(0.5);
+  const star = re.roster.stars()[0];
+  ok(star !== undefined && star.c === 2 && star.s === 'summer' && STAR_TRAITS.some((t) => t.id === star.t && t.role === Role.Forager),
+    'a star egg hatches a named star bee with its birth season', star === undefined ? 'none' : `${star.n}/${star.t}/${star.c}/${star.s}`);
+  ok(re.roster.birthText(star!).includes('第 3 轮夏天'), 'birth text shows the cycle and season', re.roster.birthText(star!));
+  const starStat = STAR_TRAITS.find((t) => t.id === star!.t)!.stat;
+  ok(re.roster.bonus(starStat).pct >= 0.1 && re.w.attrs.parts[starStat].some((p) => p.layer === 'star'), 'star bee bonus reaches the colony attributes', `${carryBefore}`);
+  re.run.res[Res.Jelly] = BigNum.of(50);
+  const up = re.roster.upgradeStar(star!.id);
+  ok(up.ok && star!.lv === 2 && Math.abs(re.roster.bonus(starStat).pct - 0.15) < 1e-9, 'star bees level up with honey and royal jelly', up.message);
+  // 明星蜂美术：画面按显示顺序把名字对应到蜜蜂上，明星蜂排在最前，一定能在画面上看到
+  ok(re.roster.traitOf(star!.id) === star!.t && re.roster.traitOf(re.roster.byRole(Role.Forager).find((b) => b.t === undefined)!.id) === '',
+    'trait lookup tells star bees from normal bees');
+  ok(re.roster.displayOrder(Role.Forager)[0].id === star!.id && re.roster.displayOrder(Role.Forager).length === re.roster.byRole(Role.Forager).length,
+    'star bees are drawn first so they always appear on screen');
+  // 工作记录：采集蜂运输次数随产量增长
+  const fr = re.roster.byRole(Role.Forager);
+  const rates = new (re.rateView.constructor as new () => typeof re.rateView)();
+  rates.nectarIn = 300;
+  re.roster.attribute(1, rates);
+  ok(fr.reduce((n, b) => n + b.a, 0) >= 10, 'forager trips are credited to named bees');
+  // 存档往返保留名册与王国
+  const back = decodeEnvelope(encodeEnvelope(re.state, DEFAULT_CONFIG.configVersion, 1)).state!;
+  ok((back.run.colony.roster ?? []).length === re.roster.list().length && back.meta.kingdom!.starEggs === 0 &&
+    (back.meta.nameSeq ?? 0) >= re.roster.list().length, 'roster, star and kingdom survive save and load');
+}
+{
+  // 传承加成：每点 +2%
+  const ls = createInitialState(DEFAULT_CONFIG, 'legacy', 0, 43);
+  const le = new GameEngine(DEFAULT_CONFIG, ls);
+  const base = le.w.attrs.get('house.brewSpeed');
+  le.state.meta.inheritance.totalPoints = 10;
+  le.w.attrs.recompute();
+  ok(Math.abs(le.w.attrs.get('house.brewSpeed') / base - (1 + legacyAura(10))) < 1e-9 && legacyAura(10) === 0.2,
+    'each inheritance point permanently adds 2% production');
+  // 王国：经验升级、发奖、研究上限
+  le.state.meta.tutorialDone = true;
+  const honey0 = le.w.econ.num(Res.Honey);
+  le.w.gainXp(le.kingdom.need(1) + le.kingdom.need(2) + 1);
+  le.step(1.05);
+  ok(le.kingdom.state().level >= 3 && le.w.econ.num(Res.Honey) > honey0, 'kingdom xp levels up and pays rewards');
+  ok(le.kingdom.need(30) > le.kingdom.need(5) && le.kingdom.need(30) < 300, 'kingdom levels stay reachable later on', `${le.kingdom.need(5)}/${le.kingdom.need(30)}`);
+  le.kingdom.state().level = 10;
+  const r0 = DEFAULT_CONFIG.research.find((r) => r.id === 'r_flight')!;
+  const off = DEFAULT_CONFIG.research.find((r) => r.id === 'r_offline')!;
+  ok(le.prog.researchMax(r0) === r0.maxLevel + 1 && le.prog.researchMax(off) === off.maxLevel, 'every 10 kingdom levels raise research caps (except offline)');
+  // 篇章：按顺序推进，只发一次奖
+  le.state.meta.kingdom!.level = 1;
+  const before = le.kingdom.chapter().index;
+  le.run.colony.roles[Role.Forager] = 40;
+  le.step(1.05);
+  le.step(1.05);
+  const after = le.kingdom.chapter();
+  ok(before === 0 && after.index === 1 && after.current !== null && after.current.metric === 'fields', 'chapters advance one goal at a time in order', `${before}->${after.index}`);
+  ok(le.run.tasksDone.filter((id) => id.startsWith('ch_')).length === 1, 'a chapter goal is rewarded once');
+}
+{
+  // 季节事件：春夏秋开头出现；广告选项必须看完广告；效果与延迟发放
+  const es = createInitialState(DEFAULT_CONFIG, 'events', 0, 47);
+  es.meta.tutorialDone = true;
+  const ee = new GameEngine(DEFAULT_CONFIG, es);
+  const cellF = ee.run.hive.cells.find((c) => c.unlocked && c.building === '');
+  if (cellF) cellF.building = Bld.ForagerRoom;
+  ee.run.colony.roles[Role.Forager] = 10;
+  ee.run.season.formal = true;
+  ee.run.season.season = 'summer';
+  ee.run.season.startedAt = ee.run.time;
+  ee.run.season.endsAt = ee.run.time + 300;
+  for (let i = 0; i < 40 && ee.events.view() === null; i++) ee.step(1);
+  const view = ee.events.view();
+  ok(view !== null && view.options.length >= 2 && view.options.some((o) => o.ad), 'a season event appears with choices and an ad option', view?.id ?? 'none');
+  const adOpt = view!.options.find((o) => o.ad)!;
+  ok(!ee.events.choose(adOpt.id).ok, 'ad-only choices need a finished ad');
+  ee.run.season.event = { id: 'farbloom', key: 'k1', until: ee.run.time + 100, resolved: false };
+  ee.w.econ.add(Res.Honey, BigNum.of(10), 'test', 't');
+  const h0 = ee.w.econ.num(Res.Honey);
+  ok(ee.events.choose('send').ok && ee.events.effects().some((fx) => fx.stat === 'forager.carry'), 'sending foragers away halves carrying for a minute');
+  for (let i = 0; i < 65; i++) ee.step(1);
+  ok(ee.w.econ.num(Res.Honey) > h0 + 50 && ee.events.effects().length === 0, 'far bloom honey arrives later and the effect expires');
+  ok(ee.events.view() === null, 'a resolved event does not come back the same season');
+}
+{
+  // 保卫战：第一个冬天后的秋天开始，三波后胜利；离开时撤退不扣蜂蜜
+  const rs2 = createInitialState(DEFAULT_CONFIG, 'raid', 0, 53);
+  rs2.meta.tutorialDone = true;
+  const ra = new GameEngine(DEFAULT_CONFIG, rs2);
+  ra.run.threats.enabled = true;
+  ra.run.threats.nextSpawnAt = 1e9;
+  ra.run.threats.nextBearAt = 1e9;
+  ra.run.season.formal = true;
+  ra.run.season.cycleIndex = 1;
+  ra.run.season.season = 'autumn';
+  ra.run.season.startedAt = ra.run.time;
+  ra.run.season.endsAt = ra.run.time + 400;
+  for (let i = 0; i < 30 && !ra.threats.raidActive(); i++) ra.step(1);
+  ok(ra.threats.raidActive() && ra.run.threats.raid?.phase === 'warn', 'the hive defense raid starts in autumn after the first winter');
+  for (let i = 0; i < 40 && ra.run.threats.raid?.phase === 'warn'; i++) ra.step(1);
+  let guard = 0;
+  while (ra.run.threats.raid?.phase === 'fight' && guard < 400) {
+    guard++;
+    ra.threats.activeList().filter((t) => t.raid === true).forEach((t) => ra.swatThreat(t.eventId));
+    ra.step(0.2);
+  }
+  ok(ra.run.threats.raid?.phase === 'won' && (ra.state.meta.raidWins ?? 0) === 1 && ra.state.meta.skins.includes('warbanner'),
+    'clearing three waves and the wasp king wins the raid', ra.run.threats.raid?.phase);
+  const bossSeen = ra.run.threats.active.some((t) => t.boss === true);
+  ok(bossSeen, 'the third wave brings the wasp king');
+  ra.run.season.cycleIndex = 2;
+  ra.run.threats.raid = { cycle: 2, phase: 'fight', wave: 1, startedAt: ra.run.time, endsAt: ra.run.time + 100, kills: 0, playerKills: 0 };
+  const honeyBefore = ra.w.econ.num(Res.Honey);
+  ra.settleOffline(600, 'raid-off', '');
+  ok(ra.run.threats.raid?.phase === 'skipped' && ra.w.econ.num(Res.Honey) >= honeyBefore, 'leaving during a raid does not lose honey');
+}
+{
+  // 分蜂：明星蜂优先跟随新蜂后，两边名册与数量一致
+  const ss = createInitialState(DEFAULT_CONFIG, 'split', 0, 59);
+  const se = new GameEngine(DEFAULT_CONFIG, ss);
+  se.run.colony.roles[Role.Forager] = 20;
+  se.step(1.05);
+  const roster = se.roster.list();
+  roster[0].t = 'lightning'; roster[0].lv = 1;
+  roster[5].t = 'bigbelly'; roster[5].lv = 2;
+  const split = se.roster.split(roster, { forager: 10, scout: 0, house: 0, guard: 0 });
+  ok(split.go.length === 10 && split.stay.length === 10 && split.go.filter((b) => b.t !== undefined).length === 2,
+    'swarm takes half the bees and all star bees go with the new queen');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

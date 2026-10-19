@@ -1,7 +1,7 @@
 import { BigNum } from '../common/BigNum';
 import { checksum } from '../common/Rng';
 import { ALL_RES, ALL_ROLES } from './Types';
-import { defaultBreedPlan } from './NewGame';
+import { defaultBreedPlan, emptyKingdom } from './NewGame';
 import { emptyDaily } from './DailyService';
 import {
   ColonySlot, ColonyState, FlowerField, GameMessage, GameState, HiveState, LedgerEntry, MapState, MetaState, RunState, RunStats, SeasonState,
@@ -252,6 +252,19 @@ export function repair(d: SaveDTO): void {
     m.introsSeen = m.featureUnlocks.length > 0 ? ['_legacy'] : [];
   }
   repairDaily(m);
+  const k = m.kingdom;
+  if (k === undefined || k === null || typeof k !== 'object') {
+    m.kingdom = emptyKingdom();
+  } else {
+    k.level = Math.max(1, Math.floor(num(k.level, 1)));
+    k.xp = Math.max(0, num(k.xp, 0));
+    k.honeyMark = Math.max(0, Math.floor(num(k.honeyMark, 0)));
+    k.starEggs = Math.max(0, Math.floor(num(k.starEggs, 0)));
+    k.honeyTotal = Math.max(0, num(k.honeyTotal, 0));
+  }
+  if (!Array.isArray(m.starCodex)) m.starCodex = [];
+  m.raidWins = Math.max(0, Math.floor(num(m.raidWins ?? 0, 0)));
+  m.nameSeq = Math.max(0, Math.floor(num(m.nameSeq ?? 0, 0)));
   if (m.codexFlowers === undefined) {
     m.codexFlowers = [];
   }
@@ -284,6 +297,12 @@ export function repair(d: SaveDTO): void {
     if (typeof slot.name !== 'string' || slot.name.length === 0) slot.name = slot.run.regionId;
     repairRun(slot.run);
   });
+  // 名字序号必须大于所有已用编号，保证之后的名字不重复
+  let maxId = -1;
+  [d.run, ...d.colonies.map((slot) => slot.run)].forEach((run) => {
+    (run.colony.roster ?? []).forEach((b) => { if (b.id > maxId) maxId = b.id; });
+  });
+  m.nameSeq = Math.max(m.nameSeq ?? 0, maxId + 1);
   if (d.messages === undefined) d.messages = [];
   if (d.ledger === undefined) d.ledger = [];
 }
@@ -321,6 +340,20 @@ function repairRun(r: RunDTO): void {
   c.plan.reserve = Math.max(0, Math.min(0.9, num(c.plan.reserve, plan.reserve)));
   c.plan.larvae = Math.max(0, Math.min(c.larvae, Math.floor(num(c.plan.larvae, 0))));
   c.queenAttempts = Math.max(0, Math.floor(num(c.queenAttempts, 0)));
+  c.queenFails = Math.max(0, Math.min(3, Math.floor(num(c.queenFails ?? 0, 0))));
+  c.luckyHatch = Math.max(0, Math.floor(num(c.luckyHatch ?? 0, 0)));
+  if (!Array.isArray(c.roster)) c.roster = [];
+  c.roster = c.roster.filter((b) => b !== null && typeof b === 'object' && typeof b.n === 'string' &&
+    ALL_ROLES.indexOf(b.r) >= 0 && Number.isFinite(b.id));
+  c.roster.forEach((b) => {
+    b.e = Math.max(50, Math.min(150, Math.round(num(b.e, 100))));
+    b.a = Math.max(0, num(b.a, 0));
+    b.b = Math.max(0, num(b.b, 0));
+    b.c = Math.floor(num(b.c, -1));
+    if (typeof b.s !== 'string') b.s = '';
+    if (typeof b.z !== 'string') b.z = r.regionId;
+    if (b.t !== undefined) b.lv = Math.max(1, Math.min(5, Math.floor(num(b.lv ?? 1, 1))));
+  });
   const validSeasons = ['tutorial', 'spring', 'summer', 'autumn', 'winterPrep', 'winter'];
   if (!r.season || validSeasons.indexOf(r.season.season) < 0) {
     r.season = {
@@ -334,6 +367,9 @@ function repairRun(r: RunDTO): void {
     r.season.wintersSurvived = Math.max(0, Math.floor(num(r.season.wintersSurvived, 0)));
     r.season.starveSeconds = Math.max(0, num(r.season.starveSeconds, 0));
   }
+  if (r.season.effects !== undefined && !Array.isArray(r.season.effects)) r.season.effects = [];
+  if (r.season.payouts !== undefined && !Array.isArray(r.season.payouts)) r.season.payouts = [];
+  if (r.season.event !== undefined && (r.season.event === null || typeof r.season.event.id !== 'string')) delete r.season.event;
   const st = r.stats;
   if (st.houseWaxMade === undefined) {
     st.houseWaxMade = 0;

@@ -35,6 +35,12 @@ export function buildHive(maxRing: number): HiveState {
   return hive;
 }
 
+/** 第 gen 代、难度 difficulty 的种区：建造、扩建、升级与研究成本倍率 */
+export function costMulFor(gen: number, difficulty: number): number {
+  const g = Math.max(0, Math.min(60, gen));
+  return Math.round((1 + 0.6 * g) * (1 + 0.35 * Math.max(0, difficulty)) * 100) / 100;
+}
+
 export class HiveService {
   private w: World;
   private index: Map<string, HexCell> = new Map<string, HexCell>();
@@ -89,9 +95,9 @@ export class HiveService {
     return this.w.econ.costOf(def.costs, this.w.count(type), this.constructionCostMul(), 4);
   }
 
-  /** 每次分蜂后，新蜂巢的建造、扩建和升级成本都是上一代的 2 倍。 */
+  /** 新巢建设成本倍率：随代数缓慢上升，并按种区难度加价（难的种区传承点也更多） */
   constructionCostMul(): number {
-    return Math.pow(2, Math.max(0, Math.min(30, this.w.s.run.regionIndex)));
+    return costMulFor(this.w.s.run.regionIndex, this.w.region().difficulty);
   }
 
   isAtCapacity(): boolean {

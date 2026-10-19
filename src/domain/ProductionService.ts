@@ -177,6 +177,7 @@ export class SeasonService {
         s.cycleIndex += 1;
         s.firstWinterProtected = false;
         this.w.s.meta.totalWinters += 1;
+        this.w.gainXp(25);
         this.w.msg('season', `成功度过第 ${s.wintersSurvived} 个冬季！春天来了。`);
         this.w.emit('spring', 0, 0, '度过冬季', 'hive');
       }
@@ -187,7 +188,18 @@ export class SeasonService {
       s.startedAt = s.endsAt;
       s.endsAt = s.endsAt + Math.max(10, this.duration(to));
       // 冬去春来已经有一条完整提示，不再额外排队“春季到了”，避免两张季节弹窗重叠。
-      if (from !== SeasonId.Winter) this.w.msg('season', `${this.def(to).name}到了`);
+      if (from !== SeasonId.Winter) {
+        // 季节每几分钟就换一次：第一轮全部提示；之后只提示需要玩家行动的秋季和冬季将至，其余记入消息
+        const lines: Record<string, string> = {
+          summer: '夏季到了：花蜜最多，敌害也更活跃',
+          autumn: '秋季到了：花蜜变少，开始为冬天储蜜',
+          winterPrep: '冬季将至：花田即将停产，抓紧储蜜',
+          winter: '冬季到了：蜂群开始消耗储蜜'
+        };
+        const text = lines[to] ?? `${this.def(to).name}到了`;
+        const important = to === SeasonId.Autumn || to === SeasonId.WinterPrep;
+        this.w.msg(s.cycleIndex === 0 || important ? 'season' : 'info', text);
+      }
       this.onChange(from, to);
     }
     this.upkeep(dt);

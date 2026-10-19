@@ -506,3 +506,47 @@ small { color: var(--sub); }
   .top-bar { min-height: 44px; }
   .modal-card, .intro-card, .offline-card { max-height: 94vh; }
 }
+
+/* 王国等级、季节事件、保卫战 */
+.kingdom-chip { padding: 7px 10px; }
+.kingdom-chip b { color: var(--accent-dark); }
+.event-chip { border-color: #7fb0e0; background: linear-gradient(180deg, #f2f8ff, #d8e9fb); color: #1d3f63; animation: none; box-shadow: var(--shadow); }
+.event-chip small { color: #2c5580; }
+.raid-chip { border-color: #c0392b; background: linear-gradient(180deg, #fff0ea, #ffd2c4); color: #6b1d12; }
+.raid-chip small { color: #8a2b1c; }
+.event-card p { line-height: 1.6; }
+.event-option { display: grid; gap: 3px; }
+.event-option small { color: var(--sub); font-size: .76rem; line-height: 1.4; }
+.chapter-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chapter-done { display: flex; align-items: center; gap: 3px; padding: 2px 8px 2px 4px; border-radius: 10px; background: #eef6e8; color: #2e6b45; font-size: .72rem; }
+.chapter-done .ui-icon { width: 14px; height: 14px; }
+
+/* 蜜蜂信息卡与名册 */
+.bee-card {
+  display: grid; width: 100%; gap: 6px; padding: 10px 12px; border: 2px solid #f2b53a; border-radius: 16px;
+  background: rgb(255 248 231 / 97%); box-shadow: var(--shadow); color: var(--text); pointer-events: auto;
+}
+.bee-head { display: flex; align-items: center; gap: 8px; }
+.bee-head > span { display: grid; min-width: 0; flex: 1; }
+.bee-head b { font-size: 1rem; }
+.bee-head small { color: var(--sub); font-size: .74rem; }
+.bee-head .round-btn { flex: none; }
+.bee-status { margin: 0; color: #2e6b45; font-size: .76rem; }
+.bee-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 10px; }
+.bee-stats span { display: grid; padding: 4px 8px; border-radius: 10px; background: #fff1d0; }
+.bee-stats small { color: var(--sub); font-size: .68rem; }
+.bee-stats b { font-size: .86rem; font-variant-numeric: tabular-nums; }
+.bee-star { margin: 0; color: #8c5a00; font-size: .8rem; font-weight: 700; }
+.roster-row { display: flex; width: 100%; align-items: center; gap: 10px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); text-align: left; cursor: pointer; }
+.roster-row > span { display: grid; min-width: 0; flex: 1; }
+.roster-row small { color: var(--sub); font-size: .72rem; }
+.roster-row i { font-style: normal; color: var(--sub); }
+.roster-row.star b { color: #8c5a00; }
+.bee-portrait { width: 40px; height: 40px; flex: none; border-radius: 12px; background: #fff1d0; }
+.bee-portrait.star { border: 2px solid #f2b53a; background: #ffe7a3; }
+.bee-head > .bee-portrait { width: 54px; height: 54px; border-radius: 16px; }
+@media (max-width: 430px) {
+  .kingdom-chip { padding: 5px 6px; }
+  .kingdom-chip small { display: none; }
+  .bee-stats { gap: 3px 6px; }
+}

@@ -2,6 +2,12 @@ import { BigNum } from '../common/BigNum';
 import { AchievementDef, Bld, Reason, Res, ResearchDef, RewardDef, Role, TalentDef, TaskDef, ALL_ROLES } from './Types';
 import { FlowerField, SwarmRecord, TalentPreset } from './State';
 import { CmdResult, CostAmount, World } from './World';
+import { costMulFor } from './HiveService';
+
+/** 种区专属成就 → 种区 */
+export const REGION_MASTERY: Record<string, string> = {
+  a_meadow: 'meadow', a_alpine: 'alpine', a_rainy: 'rainy', a_drought: 'drought', a_rooftop: 'rooftop'
+};
 
 export class SwarmCondition {
   id: string;
@@ -61,6 +67,13 @@ export class ProgressionService {
   private w: World;
   /** 新完成的任务（供 UI 表现完成演出） */
   newlyDone: string[] = [];
+  /** 研究上限加成（王国等级，由 GameEngine 注入） */
+  researchBonus: () => number = () => 0;
+
+  /** 研究等级上限：长效储备受离线上限约束，不吃王国加成 */
+  researchMax(r: ResearchDef): number {
+    return r.maxLevel + (r.id === 'r_offline' ? 0 : this.researchBonus());
+  }
 
   constructor(w: World) {
     this.w = w;
@@ -144,6 +157,7 @@ export class ProgressionService {
       }
       this.newlyDone.push(t.id);
       this.claimTask(t.id);
+      this.w.gainXp(15);
       this.w.msg('task', `完成目标：${t.name}`);
       this.w.emit('task', 0, 0, t.name, 'any');
     });
@@ -215,6 +229,16 @@ export class ProgressionService {
         ok = meta.regionsVisited.length >= 3;
       } else if (a.id === 'a_codex_flowers') {
         ok = meta.codexFlowers.length >= 8;
+      } else if (REGION_MASTERY[a.id] !== undefined) {
+        ok = this.regionMastered(REGION_MASTERY[a.id]);
+      } else if (a.id === 'a_all_regions') {
+        ok = Object.keys(REGION_MASTERY).every((id: string) => meta.achievements.indexOf(id) >= 0);
+      } else if (a.id === 'a_raid') {
+        ok = (meta.raidWins ?? 0) >= 1;
+      } else if (a.id === 'a_stars_6') {
+        ok = (meta.starCodex ?? []).length >= 6;
+      } else if (a.id === 'a_kingdom_10') {
+        ok = (meta.kingdom?.level ?? 1) >= 10;
       }
       if (ok) {
         meta.achievements.push(a.id);
@@ -226,6 +250,21 @@ export class ProgressionService {
     });
     if (this.w.adults() > run.stats.peakPop) {
       run.stats.peakPop = this.w.adults();
+    }
+  }
+
+  /** 种区专属成就：只有身处该种区时才能达成 */
+  regionMastered(regionId: string): boolean {
+    const w = this.w;
+    const run = w.s.run;
+    if (run.regionId !== regionId) return false;
+    switch (regionId) {
+      case 'meadow': return run.stats.pollinations >= 5;
+      case 'alpine': return run.season.wintersSurvived >= 3;
+      case 'rainy': return w.adults() >= 80 && run.map.fields.some((f: FlowerField) => f.discovered && f.flower === w.region().rareFlower);
+      case 'drought': return run.season.wintersSurvived >= 3;
+      case 'rooftop': return run.threats.cleared >= 30;
+      default: return false;
     }
   }
 
@@ -246,7 +285,7 @@ export class ProgressionService {
 
   researchCost(r: ResearchDef): CostAmount[] {
     return this.w.econ.costOf(r.costs, this.researchLevel(r.id),
-      Math.pow(2, Math.max(0, Math.min(30, this.w.s.run.regionIndex))));
+      costMulFor(this.w.s.run.regionIndex, this.w.region().difficulty));
   }
 
   research(id: string): CmdResult {
@@ -258,7 +297,7 @@ export class ProgressionService {
       return CmdResult.fail('HIVE_LOCKED', '需要先建造进化腔');
     }
     const lv = this.researchLevel(id);
-    if (lv >= r.maxLevel) {
+    if (lv >= this.researchMax(r)) {
       return CmdResult.fail('PROG_MAX', '已达最高等级');
     }
     if (!this.w.econ.spend(this.researchCost(r), Reason.Research, id)) {
@@ -439,7 +478,9 @@ export class ProgressionService {
     eco += run.threats.cleared >= 10 ? 2 : 0;
     eco += run.stats.pollinations >= 3 ? 2 : 0;
     p.sources.push(new PointSource('生态目标奖励', eco));
-    p.sources.push(new PointSource(`难度奖励（${region.name}）`, region.difficulty * 2));
+    p.sources.push(new PointSource(`难度奖励（${region.name}）`, region.difficulty * 4));
+    if (this.regionMastered(run.regionId)) p.sources.push(new PointSource('种区专属成就', 3));
+    if ((run.stats.raidWins ?? 0) > 0) p.sources.push(new PointSource('赢得蜂巢保卫战', 2));
     const produced = run.produced[Res.Honey] === undefined ? BigNum.zero() : run.produced[Res.Honey];
     const logBonus = Math.max(0, Math.floor(produced.log10()) - 2);
     p.sources.push(new PointSource('累计产量（对数）', logBonus));

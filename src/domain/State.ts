@@ -54,6 +54,40 @@ export interface ColonyState {
   queenAttempts: number;
   /** 繁育计划：按工种比例自动产卵与分化（中期解锁，离线照常运行） */
   plan: BreedPlan;
+  /** 有名字的蜜蜂名册：与各工种数量保持一致（缺省兼容旧存档，首次运行时补齐） */
+  roster?: NamedBee[];
+  /** 新蜂后培育连续失败次数（保底：每失败一次成功率 +15%，第 4 次必成） */
+  queenFails?: number;
+  /** 幸运孵化：接下来还有几只幼虫享受更高的明星蜂概率 */
+  luckyHatch?: number;
+}
+
+/**
+ * 有名字的蜜蜂。字段名刻意缩短以控制存档体积。
+ * a/b 的含义随工种：采集蜂 运输次数/运回花蜜；侦察蜂 出航次数/发现花田；
+ * 巢内工蜂 酿出蜂蜜/产出蜂蜡；守卫蜂 击退敌害/参战次数。
+ */
+export interface NamedBee {
+  /** 全局唯一编号（同时决定名字） */
+  id: number;
+  /** 名字 */
+  n: string;
+  /** 工种 */
+  r: string;
+  /** 出生在第几轮四季（从 0 开始；-1 表示名册建立前就已出生） */
+  c: number;
+  /** 出生季节 */
+  s: string;
+  /** 出生种区 */
+  z: string;
+  /** 效率（百分比整数，约 80~125） */
+  e: number;
+  a: number;
+  b: number;
+  /** 明星蜂特性 */
+  t?: string;
+  /** 明星蜂等级 1~5 */
+  lv?: number;
 }
 
 export interface BreedPlan {
@@ -126,6 +160,11 @@ export interface SeasonState {
   wintersSurvived: number;
   starving: boolean;
   starveSeconds: number;
+  event?: SeasonEventState;
+  lastEventKey?: string;
+  effects?: TimedEffect[];
+  payouts?: PendingPayout[];
+  challenge?: TimedChallenge;
 }
 
 export interface ThreatEvent {
@@ -139,6 +178,23 @@ export interface ThreatEvent {
   endsAt: number;
   postponed: number;
   settled: boolean;
+  /** 蜂巢保卫战中的敌人 */
+  raid?: boolean;
+  /** 胡蜂王 */
+  boss?: boolean;
+}
+
+/** 蜂巢保卫战：每个四季轮回的秋天一次，三波胡蜂后出现胡蜂王 */
+export interface RaidState {
+  cycle: number;
+  /** warn 预警 / fight 交战 / won 胜利 / lost 失利 */
+  phase: string;
+  wave: number;
+  startedAt: number;
+  /** 预警结束或交战时限 */
+  endsAt: number;
+  kills: number;
+  playerKills: number;
 }
 
 export interface ThreatState {
@@ -148,6 +204,11 @@ export interface ThreatState {
   nextId: number;
   cleared: number;
   enabled: boolean;
+  /** 连续击退次数（有敌害自行离开时归零），每 5 次额外奖励 */
+  streak?: number;
+  /** 玩家亲手拍打敌害的累计次数（用于逐步收起操作提示） */
+  swats?: number;
+  raid?: RaidState;
 }
 
 export interface GameMessage {
@@ -188,6 +249,45 @@ export interface RunStats {
   autoLays: number;
   /** 已领取春季补给的四季轮次（-1 表示还没领过） */
   springSupplyCycle?: number;
+  /** 本种区赢得的蜂巢保卫战次数 */
+  raidWins?: number;
+}
+
+/** 季节事件：每个季节开头出现一个可以选择的小事件 */
+export interface SeasonEventState {
+  id: string;
+  /** 所属“轮次:季节”，防止同一季重复出现 */
+  key: string;
+  until: number;
+  resolved: boolean;
+  choice?: string;
+}
+
+/** 限时效果（季节事件带来的增益或减益） */
+export interface TimedEffect {
+  id: string;
+  label: string;
+  stat: string;
+  mul: number;
+  until: number;
+}
+
+/** 延迟发放（如派采集蜂去远处花海，过一会儿才回来） */
+export interface PendingPayout {
+  kind: string;
+  at: number;
+  res: string;
+  amount: number;
+  text: string;
+}
+
+/** 限时挑战（蜂后的心愿：规定时间内手动采集若干次） */
+export interface TimedChallenge {
+  kind: string;
+  until: number;
+  start: number;
+  target: number;
+  reward: number;
 }
 
 /** 本轮种区状态：分蜂时整体重建 */
@@ -286,6 +386,25 @@ export interface MetaState {
   introsSeen: string[];
   /** 每日签到与每日目标（按玩家本地日期） */
   daily: DailyState;
+  /** 王国等级 */
+  kingdom?: KingdomState;
+  /** 已经起过名的蜜蜂数量（决定下一个名字，保证不重名） */
+  nameSeq?: number;
+  /** 收集过的明星蜂特性 */
+  starCodex?: string[];
+  /** 蜂巢保卫战胜利次数 */
+  raidWins?: number;
+}
+
+export interface KingdomState {
+  level: number;
+  xp: number;
+  /** 已结算的累计蜂蜜里程碑（log10 的四分之一档） */
+  honeyMark: number;
+  /** 王国奖励的“明星蜂卵”：下一次孵化必出明星蜂 */
+  starEggs: number;
+  /** 累计蜂蜜产量（跨种区），用于里程碑 */
+  honeyTotal: number;
 }
 
 export interface DailyTask {

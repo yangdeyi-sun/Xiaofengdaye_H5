@@ -51,22 +51,34 @@ export class ColonyService {
     ];
   }
 
-  /** 分蜂蜂后培育：每次消耗固定储备，独立进行 25% 成功判定。 */
+  /** 新蜂后培育成功率：基础 25%，每连续失败一次 +15%，连败 3 次后第 4 次必成 */
+  queenChance(): number {
+    const fails = Math.max(0, Math.floor(this.w.s.run.colony.queenFails ?? 0));
+    if (fails >= 3) return 1;
+    return Math.min(1, this.w.cfg.swarm.queenSuccessChance + 0.15 * fails);
+  }
+
+  /** 分蜂蜂后培育：失败返还一半资源，并提高下一次的成功率（保底）。 */
   differentiateQueen(): CmdResult {
     const colony = this.w.s.run.colony;
     if (colony.youngQueens > 0) return CmdResult.fail('QUEEN_READY', '新蜂后已经准备好，可以发起分蜂');
     const costs = this.queenCost();
     if (!this.w.econ.canAfford(costs)) {
-      return CmdResult.fail('ECON_SHORT', '培育新蜂后需要1000蜂蜜、400蜂蜡和5蜂王浆');
+      return CmdResult.fail('ECON_SHORT', `培育新蜂后需要${this.w.cfg.swarm.queenHoney}蜂蜜、${this.w.cfg.swarm.queenWax}蜂蜡和${this.w.cfg.swarm.queenJelly}蜂王浆`);
     }
     if (!this.w.econ.spend(costs, Reason.Hatch, 'young-queen')) {
       return CmdResult.fail('ECON_SHORT', '培育新蜂后的资源不足');
     }
     colony.queenAttempts += 1;
-    if (!this.w.rng.chance(this.w.cfg.swarm.queenSuccessChance)) {
-      this.w.msg('warn', '本次蜂后分化没有成功，投入的育王资源已经消耗。');
-      return CmdResult.fail('QUEEN_FAILED', '蜂后分化失败（成功率25%）');
+    const chance = this.queenChance();
+    if (chance < 1 && !this.w.rng.chance(chance)) {
+      colony.queenFails = (colony.queenFails ?? 0) + 1;
+      this.w.econ.refund(costs, 0.5, 'young-queen-refund');
+      const next = Math.round(this.queenChance() * 100);
+      this.w.msg('warn', `这次蜂后没能分化成功，返还了一半育王资源。下次成功率 ${next}%${next >= 100 ? '（必定成功）' : ''}。`);
+      return CmdResult.fail('QUEEN_FAILED', `没有成功，已返还一半资源 · 下次成功率 ${next}%`);
     }
+    colony.queenFails = 0;
     colony.youngQueens += 1;
     this.w.msg('milestone', '新蜂后分化成功！她已经可以带领一半蜂群和资源建立新巢。');
     this.w.emit('milestone', 0, 0, '新蜂后诞生', 'hive');
@@ -356,9 +368,11 @@ export class ColonyService {
         c.roles[b.targetRole] = this.w.role(b.targetRole) + b.count;
         c.collapsed = false;
         c.hatched += b.count;
-        if (this.w.rng.chance(this.w.attrs.get('queen.special'))) {
+        this.w.onHatch(b.targetRole, b.count, false);
+        // 特殊变异：额外诞生一只有特性的明星蜂（名册登记时决定特性）
+        if (this.w.starRoll()) {
           c.roles[b.targetRole] = this.w.role(b.targetRole) + 1;
-          this.w.msg('special', `特殊变异！一只优秀的${this.w.roleDef(b.targetRole).name}诞生了`);
+          this.w.onHatch(b.targetRole, 1, true);
         }
         this.w.emit('hatch', 0, 0, this.w.roleDef(b.targetRole).name, 'hive');
         this.w.dailyBump('hatch', b.count);

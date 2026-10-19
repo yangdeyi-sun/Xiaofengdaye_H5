@@ -77,6 +77,17 @@ export class StatPart {
 }
 
 /** 统一属性聚合（需求书6.8）：基础 → 巢房 → 相邻 → 研究 → 传承 → 季节地图 → 事件 → 上下限 */
+/** 吃到传承加成的产量属性 */
+export const LEGACY_STATS = ['forager.carry', 'house.brewSpeed', 'house.waxRate'];
+export const LEGACY_PER_POINT = 0.02;
+
+export function legacyAura(points: number): number {
+  return Math.max(0, points) * LEGACY_PER_POINT;
+}
+
+/** 日常行为折算王国经验（每次/每只） */
+const XP_BY_KIND: Record<string, number> = { hatch: 2, upgrade: 3, build: 3, threat: 5, bloom: 4 };
+
 export class AttributeService {
   private w: World;
   values: Record<string, number> = {};
@@ -179,6 +190,22 @@ export class AttributeService {
           v = v + tAdd;
           parts.push(new StatPart('talent+', '蜂王传承', tAdd));
         }
+        // 传承加成：每个累计传承点让全巢产量 +2%，让每一代新巢都明显比上一代起步更快
+        const aura = legacyAura(meta.inheritance.totalPoints);
+        if (aura > 0 && LEGACY_STATS.indexOf(sd.id) >= 0) {
+          v = v * (1 + aura);
+          parts.push(new StatPart('legacy', '传承加成', 1 + aura));
+        }
+      }
+      // 明星蜂
+      const star = this.w.starBonus(sd.id);
+      if (star.pct !== 0) {
+        v = v * (1 + star.pct);
+        parts.push(new StatPart('star', '明星蜂', 1 + star.pct));
+      }
+      if (star.add !== 0) {
+        v = v + star.add;
+        parts.push(new StatPart('star+', '明星蜂', star.add));
       }
       // 季节与地图
       if (sd.id === 'forager.speed' || sd.id === 'scout.speed') {
@@ -188,6 +215,15 @@ export class AttributeService {
           v = v * fly;
           parts.push(new StatPart('season', `${region.name}气候`, fly));
         }
+      }
+      // 季节事件的限时效果
+      const effects = run.season.effects;
+      if (Array.isArray(effects)) {
+        effects.forEach((fx) => {
+          if (fx.stat !== sd.id || fx.until <= run.time) return;
+          v = v * fx.mul;
+          parts.push(new StatPart('event', fx.label, fx.mul));
+        });
       }
       // 临时事件
       if (run.season.starving && (sd.id === 'forager.collect' || sd.id === 'house.brewSpeed')) {
@@ -487,8 +523,27 @@ export class World {
   econ: EconomyService;
   /** 离线聚合结算模式（SAVE-006）：不触发重大事件 */
   offline: boolean = false;
-  /** 每日目标进度：各系统在事件发生时调用 */
+  /** 孵化完成的回调（蜜蜂名册登记新成员），由 GameEngine 注入 */
+  onHatch: (role: string, count: number, star: boolean) => void = () => {};
+  /** 具体某只蜜蜂的工作记录（侦察出航、发现花田、守卫击退），由 GameEngine 注入 */
+  onBee: (kind: string, index: number, ref: string) => void = () => {};
+  /** 孵化时判定是否额外诞生一只明星蜂，由 GameEngine 注入 */
+  starRoll: () => boolean = () => false;
+  /** 明星蜂加成，由 GameEngine 注入 */
+  starBonus: (stat: string) => { pct: number; add: number } = () => ({ pct: 0, add: 0 });
+
+  /** 王国经验 */
+  gainXp(n: number): void {
+    if (n <= 0 || !Number.isFinite(n)) return;
+    const k = this.s.meta.kingdom;
+    if (k === undefined) return;
+    k.xp += n;
+  }
+
+  /** 每日目标进度：各系统在事件发生时调用；同时折算王国经验 */
   dailyBump(kind: string, n: number): void {
+    const xp = XP_BY_KIND[kind];
+    if (xp !== undefined && n > 0) this.gainXp(xp * n);
     const d = this.s.meta.daily;
     if (d === undefined || n <= 0) return;
     d.tasks.forEach((t) => {

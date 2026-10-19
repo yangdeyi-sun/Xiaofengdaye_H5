@@ -348,7 +348,16 @@ const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'a_bear', name: '熊口夺蜜', desc: '击退一次熊袭击', skin: 'midnight' },
   { id: 'a_winters_5', name: '凛冬行家', desc: '累计度过 5 个冬季', skin: 'frost' },
   { id: 'a_regions_3', name: '四海为巢', desc: '在 3 个不同种区建立蜂巢', skin: 'meadow' },
-  { id: 'a_codex_flowers', name: '百花图谱', desc: '花种图鉴收集 8 种', skin: '' }
+  { id: 'a_codex_flowers', name: '百花图谱', desc: '花种图鉴收集 8 种', skin: '' },
+  { id: 'a_meadow', name: '草甸花语', desc: '在起源草甸让花田授粉成长 5 次', skin: 'clover' },
+  { id: 'a_alpine', name: '雪线之上', desc: '在高寒山地熬过 3 个冬天', skin: 'snowline' },
+  { id: 'a_rainy', name: '雨中蜜语', desc: '在雨季湿地发现睡莲，并让蜂群达到 80 只', skin: 'lily' },
+  { id: 'a_drought', name: '荒原守望', desc: '在干旱荒原熬过 3 个冬天', skin: 'dune' },
+  { id: 'a_rooftop', name: '屋顶蜂农', desc: '在城市屋顶击退 30 次敌害', skin: 'neon' },
+  { id: 'a_all_regions', name: '五域之主', desc: '达成全部 5 个种区专属成就', skin: 'emperor' },
+  { id: 'a_raid', name: '保卫蜂巢', desc: '赢得一次蜂巢保卫战', skin: '' },
+  { id: 'a_stars_6', name: '星光熠熠', desc: '收集 6 种明星蜂特性', skin: 'starlight' },
+  { id: 'a_kingdom_10', name: '十级王国', desc: '王国等级达到 10 级', skin: '' }
 ];
 
 const SKINS: SkinDef[] = [
@@ -357,7 +366,17 @@ const SKINS: SkinDef[] = [
   { id: 'lavender', name: '薰衣草', cellFill: '#E8D27A', cellStroke: '#7D5BA6', bg: '#2C2340' },
   { id: 'midnight', name: '午夜', cellFill: '#E9B949', cellStroke: '#3D5A80', bg: '#141C2B' },
   { id: 'frost', name: '霜蜜', cellFill: '#F4E3A1', cellStroke: '#7FA7C9', bg: '#23313F' },
-  { id: 'meadow', name: '草甸', cellFill: '#F5CF5B', cellStroke: '#5E8C31', bg: '#22301A' }
+  { id: 'meadow', name: '草甸', cellFill: '#F5CF5B', cellStroke: '#5E8C31', bg: '#22301A' },
+  { id: 'clover', name: '三叶草', cellFill: '#F3D36B', cellStroke: '#3F8F4A', bg: '#16301C' },
+  { id: 'snowline', name: '雪线', cellFill: '#F7EBC4', cellStroke: '#6E9CC2', bg: '#1C2836' },
+  { id: 'lily', name: '睡莲', cellFill: '#F6CFA0', cellStroke: '#D97A9A', bg: '#1E2C2A' },
+  { id: 'dune', name: '沙丘', cellFill: '#F0C070', cellStroke: '#A0642A', bg: '#33230F' },
+  { id: 'neon', name: '霓虹天台', cellFill: '#F4D35E', cellStroke: '#3FB8C9', bg: '#1A1530' },
+  { id: 'emperor', name: '五域王冠', cellFill: '#FFD86B', cellStroke: '#8A2BE2', bg: '#1F0F2E' },
+  { id: 'warbanner', name: '战旗', cellFill: '#F2B84B', cellStroke: '#B23A2E', bg: '#2A1410' },
+  { id: 'starlight', name: '星光', cellFill: '#F8E7A0', cellStroke: '#E0A800', bg: '#121A33' },
+  { id: 'royal', name: '王国金', cellFill: '#FFCF40', cellStroke: '#8C5A00', bg: '#2B1C05' },
+  { id: 'starry', name: '星夜', cellFill: '#EED98A', cellStroke: '#5B6CD6', bg: '#0E1430' }
 ];
 
 function tu(id: string, title: string, text: string, focus: string, doneTask: string): TutorialStepDef {
@@ -450,7 +469,7 @@ export const DEFAULT_CONFIG: GameConfigDef = {
     basePoints: 5,
     resourceBonusCap: 0.2,
     queenHoney: 1000,
-    queenWax: 400,
+    queenWax: 250,
     queenJelly: 5,
     queenSuccessChance: 0.25
   }

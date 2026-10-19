@@ -241,6 +241,7 @@ export class MapService {
         return;
       }
       a.state = SCOUT_FLY;
+      this.w.onBee('flight', this.w.s.run.map.scouts.indexOf(a), f.fieldId);
       a.targetField = f.fieldId;
       a.tx = f.x;
       a.ty = f.y;
@@ -303,7 +304,13 @@ export class MapService {
         return;
       }
       // MAP-004：动画结束与业务生效时点一致
+      const target = this.w.field(a.targetField);
+      const fresh = target !== null && !target.discovered;
       this.publishDiscovery(a.targetField);
+      if (fresh) {
+        this.w.onBee('find', this.w.s.run.map.scouts.indexOf(a), a.targetField);
+        this.w.gainXp(4);
+      }
       if (this.w.hasFlag('doubleDance')) {
         const second = this.pickScoutTarget(a);
         if (second !== null && second.discovered && !second.hidden) {
@@ -601,6 +608,7 @@ export class MapService {
           this.w.msg('pollinate', `授粉成功：${fd.name}等级提升到 ${f.level}`);
         }
         this.w.s.run.stats.pollinations += 1;
+        this.w.gainXp(8);
         this.w.emit('bloom', f.x, f.y, '花田成长', 'field');
       }
     });
