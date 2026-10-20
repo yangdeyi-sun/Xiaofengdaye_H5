@@ -10,16 +10,12 @@ import { createInitialState } from '../domain/NewGame';
 import { GameEngine } from '../domain/GameEngine';
 import { buildHive } from '../domain/HiveService';
 import { decodeEnvelope, encodeEnvelope, toDTO, SaveEnvelope } from '../domain/SaveCodec';
-<<<<<<< Updated upstream
-import { Bld, Res, Role, ThreatPhase, ThreatType } from '../domain/Types';
+import { Bld, Res, Role, SeasonId, ThreatPhase, ThreatType } from '../domain/Types';
 import { PresentationQueue } from '../app/PresentationQueue';
 import { costMulFor } from '../domain/HiveService';
 import { beeName, namePoolSize } from '../domain/BeeNames';
 import { STAR_TRAITS } from '../domain/RosterService';
 import { legacyAura } from '../domain/World';
-=======
-import { Bld, Res, Role, SeasonId, ThreatPhase, ThreatType } from '../domain/Types';
->>>>>>> Stashed changes
 import { Guide, INTRO_TOPICS } from '../domain/Guide';
 import { softExponent } from '../domain/World';
 import { buildArtManifest } from '../scene/ArtManifest';
@@ -434,24 +430,6 @@ ok(winterDelay.run.season.season === 'winterPrep', 'winter preparation starts no
 // ---------- 越冬阶梯与储备失败 ----------
 const s6 = decodeEnvelope(text).state!;
 const e6 = new GameEngine(DEFAULT_CONFIG, s6);
-<<<<<<< Updated upstream
-e6.run.res[Res.Honey] = BigNum.zero();
-e6.run.res[Res.Nectar] = BigNum.zero();
-e6.run.colony.roles[Role.Forager] = 300;
-e6.run.map.fields.forEach((f) => { f.stock = 0; });
-e6.season.startFormal();
-// 只观察越冬：关掉敌害（新手后的敌害会咬死蜜蜂）
-e6.run.threats.active = [];
-e6.run.threats.nextSpawnAt = 1e9;
-e6.run.threats.nextBearAt = 1e9;
-e6.run.season.season = 'winter';
-e6.run.season.endsAt = e6.run.time + 100;
-const adults6 = e6.w.adults();
-let starvedSeen = false;
-for (let i = 0; i < 600; i++) { e6.step(0.1); starvedSeen = starvedSeen || e6.run.season.starving; }
-ok(starvedSeen && e6.w.adults() === adults6, 'first winter: starving but no deaths/injury loss', `${e6.w.adults()}/${adults6}`);
-ok(e6.w.injured(Role.Forager) === 0, 'first winter protected: no injuries');
-=======
 ok(e6.season.winterNeed() === 100, 'first winter requires 100 honey');
 e6.run.colony.roles[Role.Forager] = 3;
 e6.run.hive.cells.find((cell) => cell.unlocked && cell.building === '')!.building = Bld.Storage;
@@ -464,7 +442,6 @@ ok(e6.w.adults() === 0 && e6.w.count(Bld.Storage) === 0 && e6.w.econ.num(Res.Hon
   'insufficient winter reserve restarts resources, population and buildings from zero');
 ok(e6.state.messages.some((message) => message.text.includes('蜂巢死亡')),
   'winter failure records a clear hive death message');
->>>>>>> Stashed changes
 
 const winterSuccess = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'winter-success', 0, 27));
 winterSuccess.run.season.formal = true;

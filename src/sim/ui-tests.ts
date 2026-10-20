@@ -138,6 +138,7 @@ check(scroll.scrollTop > 0, 'full settings scrolls inside the drawer');
 const scrollTop = scroll.scrollTop;
 controller.refreshGame(true); ui.draw();
 check(ui.document.root.querySelector<UiElement>('.panel-scroll')!.scrollTop === scrollTop, 'periodic markup refresh retains scrolling position');
+e.run.colony.larvae = 0;
 controller.openPanel('queen'); ui.draw();
 click('hatch', Role.Forager);
 check(ui.document.root.querySelector('.toast.error')?.textContent.includes('没有幼虫') === true,

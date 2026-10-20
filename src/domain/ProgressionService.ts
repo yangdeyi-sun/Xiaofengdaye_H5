@@ -609,13 +609,10 @@ export class ProgressionService {
     if (this.w.count(Bld.ScoutRoom) > 0 && this.w.role(Role.Scout) > 0) {
       meta.tutorialStep = steps.length;
       meta.tutorialDone = true;
-<<<<<<< Updated upstream
       this.w.requestName(this.w.s.activeColonyId);
-=======
       // 这些概念已在单步引导中实际操作过，不再在交接后连续弹出介绍卡。
       ['flowers', 'honey', 'queen', 'larva', 'brewery', 'house', 'foragerRoom', 'forager', 'scoutRoom', 'scout']
         .forEach((id) => { if (meta.introsSeen.indexOf(id) < 0) meta.introsSeen.push(id); });
->>>>>>> Stashed changes
       this.w.msg('info', '新手引导完成：蜂后把整座蜂巢托付给了你。');
     }
   }
