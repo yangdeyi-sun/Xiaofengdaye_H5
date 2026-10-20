@@ -133,7 +133,7 @@ export function createRun(cfg: GameConfigDef, regionId: string, regionIndex: num
   };
   const map: MapState = { fields: generateFields(cfg, region, rng), scouts: [], nextScoutId: 1 };
   const season: SeasonState = {
-    formal: false, season: SeasonId.Tutorial, startedAt: 0, endsAt: 0, cycleIndex: 0, firstWinterProtected: true,
+    formal: false, season: SeasonId.Tutorial, startedAt: 0, endsAt: 0, cycleIndex: 0, firstWinterProtected: false,
     wintersSurvived: 0, starving: false, starveSeconds: 0
   };
   const threats: ThreatState = { active: [], nextSpawnAt: 0, nextBearAt: 0, nextId: 1, cleared: 0, enabled: false };
@@ -159,7 +159,7 @@ export function createInitialState(cfg: GameConfigDef, playerId: string, now: nu
     vibration: true, particles: true, reduceMotion: false, eventAnimations: true, gameSpeed: 1,
     ecoMode: false, skin: 'classic',
     continuation: false, privacyAccepted: false, privacyVersion: '', fontScaleSafe: true,
-    orientation: 'auto'
+    orientation: 'portrait'
   };
   const meta: MetaState = {
     playerId: playerId, createdAt: now, totalPlayTime: 0, swarmCount: 0, regionsVisited: [cfg.regions[0].id],

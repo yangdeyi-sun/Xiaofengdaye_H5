@@ -107,6 +107,12 @@ export class GameEngine {
       this.seasonLog.push(to);
       this.w.emit('season', 0, 0, this.season.def(to).name, 'any');
     };
+    this.season.onWinterFailure = (need: number, have: number) => {
+      this.restartCurrentHive(
+        `入冬需要 ${Math.ceil(need)} 蜂蜜，当前只有 ${Math.floor(have)}。储备不足，蜂巢死亡，资源、人口和建设已从零开始。`,
+        '越冬失败'
+      );
+    };
     this.w.refreshFlags();
     this.hive.recomputeAdjacency();
     this.w.attrs.recompute();
@@ -256,8 +262,13 @@ export class GameEngine {
 
   /** 蜂巢达到扩建上限却未及时分蜂：当前蜂群坠落，本蜂群从零重建。 */
   private dropOvergrownHive(): void {
+    this.restartCurrentHive('蜂巢超过承重期限后坠落损毁，当前蜂群的资源、人口和建设已从零开始。', '蜂巢坠落');
+  }
+
+  /** 保留账号设置与长期记录，仅把当前蜂巢的本轮内容清零。 */
+  private restartCurrentHive(message: string, eventLabel: string): void {
     const old = this.run;
-    const seed = hashSeed(`${this.state.meta.playerId}:fall:${old.regionId}:${old.regionIndex}:${old.time}`);
+    const seed = hashSeed(`${this.state.meta.playerId}:restart:${eventLabel}:${old.regionId}:${old.regionIndex}:${old.time}`);
     const fresh = createRun(this.w.cfg, old.regionId, old.regionIndex, seed, 0);
     ALL_RES.forEach((res: string) => { fresh.res[res] = BigNum.zero(); });
     rebindRun(this.w.s, this.w.cfg, old, fresh, this.w.s.activeColonyId);
@@ -269,8 +280,8 @@ export class GameEngine {
     this.w.refreshFlags();
     this.hive.recomputeAdjacency();
     this.w.attrs.recompute();
-    this.w.msg('error', '蜂巢超过承重期限后坠落损毁，当前蜂群的资源、人口和建设已从零开始。');
-    this.w.emit('fail', 0, 0, '蜂巢坠落', 'hive');
+    this.w.msg('error', message);
+    this.w.emit('fail', 0, 0, eventLabel, 'hive');
     this.saveRequested = true;
   }
 
@@ -455,6 +466,10 @@ export class GameEngine {
     p.cur = this.w.attrs.get(t.stat);
     p.costs = this.hive.upgradeCost(t);
     p.affordable = this.w.econ.canAfford(p.costs);
+    if (p.level >= p.maxLevel) {
+      p.next = p.cur;
+      return p;
+    }
     const before = this.estimateHoneyPerMin();
     this.run.upgrades[t.id] = p.level + 1;
     this.w.attrs.recompute();
@@ -789,7 +804,7 @@ export class GameEngine {
     });
     const notes: string[] = [];
     if (this.seasonLog.indexOf(SeasonId.Winter) >= 0) {
-      notes.push('离线期间经历了冬季，蜂群依靠储备度过（离线不会造成蜜蜂死亡）');
+      notes.push('离线期间经历了冬季，越冬储备已按当前门槛结算');
     }
     const ob = s.run.overflow[Res.Honey];
     if (ob !== undefined && ob.gt(BigNum.of(1))) {

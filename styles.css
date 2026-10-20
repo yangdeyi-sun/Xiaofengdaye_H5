@@ -26,7 +26,7 @@ button:focus-visible, input:focus-visible, canvas:focus-visible {
   outline: 3px solid rgb(232 163 23 / 55%);
   outline-offset: 2px;
 }
-button:disabled { cursor: not-allowed; opacity: .46; }
+button:disabled, button[aria-disabled="true"], .btn.disabled { cursor: not-allowed; opacity: .52; }
 h1, h2, h3, p { margin-top: 0; }
 h1 { font-size: clamp(1.6rem, 4vw, 2.3rem); }
 h2 { font-size: 1.3rem; }
@@ -37,6 +37,13 @@ small { color: var(--sub); }
 .muted { color: var(--sub); }
 .fine-print { color: var(--sub); font-size: .76rem; line-height: 1.55; }
 .link-color, .key-note { color: #8e44ad; }
+.upgrade-level, .upgrade-value { display: flex; align-items: center; gap: 8px; }
+.upgrade-level { margin: 2px 0 7px; color: #70470d; }
+.upgrade-level i, .upgrade-value i { color: var(--accent-dark); font-style: normal; font-weight: 900; }
+.upgrade-level em { padding: 2px 7px; border-radius: 999px; color: #fff; background: #8a7759; font-size: .68rem; font-style: normal; }
+.upgrade-value { flex-wrap: wrap; margin-bottom: 7px; }
+.upgrade-value span { padding: 5px 8px; border-radius: 9px; background: #fff2cf; font-size: .76rem; }
+.upgrade-value span:last-child { color: #176437; background: #e2f4d8; }
 .warning, .warning-text, .danger-text { color: var(--danger); }
 .ok { color: var(--ok); }
 .ui-icon { width: 25px; height: 25px; flex: none; object-fit: contain; pointer-events: none; }
@@ -142,7 +149,7 @@ small { color: var(--sub); }
 }
 .hud-stack > * { width: 100%; pointer-events: none; }
 .top-bar {
-  display: flex; min-height: 54px; align-items: stretch; gap: 8px; pointer-events: none;
+  display: flex; min-height: 54px; flex-wrap: wrap; align-items: stretch; justify-content: center; gap: 6px 8px; pointer-events: none;
 }
 .top-bar button, .top-bar .resource-chip { pointer-events: auto; }
 .season-chip, .resource-scroll, .status-alert {
@@ -155,9 +162,11 @@ small { color: var(--sub); }
 .season-chip small, .resource-chip small { font-size: .68rem; }
 .status-alert { position: relative; justify-content: center; width: 48px; padding: 8px; }
 .status-alert b { position: absolute; top: -5px; right: -5px; min-width: 20px; padding: 2px 5px; border-radius: 20px; color: white; background: var(--danger); font-size: .7rem; }
-.resource-scroll { min-width: 0; flex: 1; overflow-x: auto; padding: 5px 8px; scrollbar-width: none; }
+.resource-scroll { width: 100%; min-width: 0; flex: 1 0 100%; overflow: hidden; padding: 5px 8px; scrollbar-width: none; }
 .resource-scroll::-webkit-scrollbar { display: none; }
-.resource-chip { display: flex; min-width: 94px; flex: none; align-items: center; gap: 6px; padding: 3px 7px; box-shadow: none; }
+.resource-chip { display: flex; min-width: 0; flex: 1 1 25%; align-items: center; justify-content: center; gap: 5px; padding: 3px 5px; box-shadow: none; }
+.resource-chip .resource-name { color: #76531e; font-size: .66rem; font-weight: 700; line-height: 1; }
+.resource-chip .resource-rate { overflow: hidden; max-width: 100%; font-size: .62rem; text-overflow: ellipsis; white-space: nowrap; }
 .resource-chip b { display: inline-block; font-variant-numeric: tabular-nums; transition: transform .18s ease, color .18s ease; }
 .resource-chip.bump b { color: #2e8b57; transform: scale(1.18); }
 .resource-chip.full b { color: var(--danger); }
@@ -416,7 +425,7 @@ small { color: var(--sub); }
   .season-chip { padding: 5px 7px; }
   .season-chip .ui-icon { width: 22px; height: 22px; }
   .season-chip b { font-size: .76rem; }
-  .resource-chip { min-width: 80px; padding: 2px 4px; }
+  .resource-chip { min-width: 0; padding: 2px 3px; }
   .resource-chip .ui-icon { width: 21px; height: 21px; }
   .resource-chip b { font-size: .78rem; }
   .status-alert { width: 40px; padding: 5px; }
@@ -443,8 +452,10 @@ small { color: var(--sub); }
 @media (max-width: 430px) {
   .season-chip small { display: none; }
   .resource-scroll { padding-inline: 3px; }
-  .resource-chip { min-width: 70px; }
-  .resource-chip small { display: none; }
+  .resource-chip { min-width: 0; gap: 2px; }
+  .resource-chip .resource-rate { display: none; }
+  .resource-chip .resource-name { display: block; font-size: .58rem; }
+  .resource-chip span { min-width: 0; }
   .hint-main { padding: 7px 9px; }
   .hint-main span { font-size: .8rem; }
   .prod-node b { display: none; }

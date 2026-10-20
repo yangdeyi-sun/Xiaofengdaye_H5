@@ -204,7 +204,7 @@ export function migrate(d: SaveDTO, from: number): SaveDTO {
   if (from === 2) {
     d.activeColonyId = 'colony-0';
     d.colonies = [];
-    d.meta.settings.orientation = 'auto';
+    d.meta.settings.orientation = 'portrait';
   }
   return d;
 }
@@ -242,8 +242,8 @@ export function repair(d: SaveDTO): void {
   if (settings.eventAnimations === undefined) {
     settings.eventAnimations = true;
   }
-  // v0.5.1 以前保存的是手动固定方向；新版本统一恢复为跟随设备姿态。
-  settings.orientation = 'auto';
+  // 新安装默认竖屏；旧版的 auto 值迁移为竖屏，已明确选择横屏的玩家设置继续保留。
+  settings.orientation = settings.orientation === 'landscape' ? 'landscape' : 'portrait';
   const gameSpeed = num(settings.gameSpeed, 1);
   settings.gameSpeed = [1, 2, 4].indexOf(gameSpeed) >= 0 ? gameSpeed : 1;
   if (m.featureUnlocks === undefined) {
@@ -362,12 +362,13 @@ function repairRun(r: RunDTO): void {
   if (!r.season || validSeasons.indexOf(r.season.season) < 0) {
     r.season = {
       formal: false, season: 'tutorial', startedAt: r.time, endsAt: r.time, cycleIndex: 0,
-      firstWinterProtected: true, wintersSurvived: 0, starving: false, starveSeconds: 0
+      firstWinterProtected: false, wintersSurvived: 0, starving: false, starveSeconds: 0
     };
   } else {
     r.season.startedAt = Math.max(0, num(r.season.startedAt, r.time));
     r.season.endsAt = Math.max(r.season.startedAt, num(r.season.endsAt, r.time));
     r.season.cycleIndex = Math.max(0, Math.floor(num(r.season.cycleIndex, 0)));
+    r.season.firstWinterProtected = false;
     r.season.wintersSurvived = Math.max(0, Math.floor(num(r.season.wintersSurvived, 0)));
     r.season.starveSeconds = Math.max(0, num(r.season.starveSeconds, 0));
   }

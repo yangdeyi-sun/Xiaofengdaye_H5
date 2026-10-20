@@ -50,6 +50,12 @@ click('privacy-reconsider'); click('privacy-accept');
 check(session.engine().state.meta.settings.privacyVersion === PRIVACY_VERSION && ui.document.root.querySelector('.home-card') !== null, 'privacy acceptance opens complete homepage');
 click('home-start');
 check(ui.document.root.querySelector('#game-screen') !== null && ui.document.root.querySelector('.prod-strip') !== null, 'full game HUD replaces simplified mini-game navigation');
+const resourceLabels = ui.document.root.querySelectorAll('.resource-name').map((node) => node.textContent);
+check(resourceLabels.join(',') === '花蜜,蜂蜜,蜂蜡,蜂王浆', 'HUD keeps all four named resources visible in one row');
+const resourceChips = ui.document.root.querySelectorAll<UiElement>('.resource-chip');
+check(resourceChips.every((chip) => chip.rect.width > 40 && chip.rect.x + chip.rect.width <= viewport.width + 1) &&
+  resourceChips.every((chip) => Math.abs(chip.rect.y - resourceChips[0].rect.y) < 1),
+  'four resource chips fit the portrait viewport without horizontal scrolling');
 const e = session.engine();
 e.state.meta.tutorialDone = true;
 e.run.tasksDone = e.w.cfg.tasks.map((task) => task.id);
@@ -115,8 +121,14 @@ for (const panel of ['hub', 'queen', 'tasks', 'build', 'colony', 'cell', 'upgrad
   check(ui.document.root.querySelector('.panel-frame > header h2')!.textContent !== '功能', `complete shared ${panel} panel is present`);
   check(ui.document.root.querySelector('.panel-scroll')!.rect.height > 100, `${panel} panel has a usable scroll viewport`);
 }
+controller.openPanel('upgrade'); ui.draw();
+const upgradeValue = ui.document.root.querySelector('.upgrade-value')?.textContent ?? '';
+check(upgradeValue.includes('当前') && upgradeValue.includes('升级后'), 'upgrade cards compare the current and next numeric values directly');
+controller.openPanel('settings'); ui.draw();
 const music = e.state.meta.settings.music;
 click('toggle-setting', 'music'); check(e.state.meta.settings.music !== music, 'mini settings execute the exact shared setting action');
+click('set-orientation', 'landscape');
+check(e.state.meta.settings.orientation === 'landscape', 'settings persist an explicit landscape choice while portrait remains the default');
 const range = ui.document.root.querySelector<UiElement>('input[data-id="musicVolume"]')!;
 const rect = range.getBoundingClientRect(); ui.touchStart(rect.x + rect.width * 0.5, rect.y + rect.height / 2, 4); ui.touchEnd(rect.x + rect.width * 0.5, rect.y + rect.height / 2, 4);
 check(e.state.meta.settings.musicVolume === 50, 'touch slider updates shared volume setting');
@@ -127,6 +139,10 @@ const scrollTop = scroll.scrollTop;
 controller.refreshGame(true); ui.draw();
 check(ui.document.root.querySelector<UiElement>('.panel-scroll')!.scrollTop === scrollTop, 'periodic markup refresh retains scrolling position');
 controller.openPanel('queen'); ui.draw();
+click('hatch', Role.Forager);
+check(ui.document.root.querySelector('.toast.error')?.textContent.includes('没有幼虫') === true,
+  'pressing a disabled action explains why it is unavailable');
+click('dismiss-toast');
 const honey = e.w.econ.num('honey'); click('lay');
 check(e.w.econ.num('honey') < honey && e.run.colony.larvae > 0, 'shared manual breeding spends resources and adds larvae');
 for (const [width, height] of [[320, 568], [390, 844], [844, 390], [1024, 768], [1440, 900]]) {

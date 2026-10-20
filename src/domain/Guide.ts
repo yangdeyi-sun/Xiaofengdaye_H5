@@ -3,11 +3,8 @@ import { Bld, Res, Role, SeasonId, ThreatType, UpgradeTrackDef } from './Types';
 import { FlowerField, HexCell, ThreatEvent } from './State';
 
 /**
- * 引导（替代逐步指令式新手教程）：
- * 1. 新事物介绍：玩家第一次遇到某样东西（花丛、蜂后、幼虫、某种巢房、某种敌害、四季……）时弹一次，
- *    只讲“这是什么、有什么用”，不规定下一步必须做什么；看过即记入存档 meta.introsSeen。
- * 2. 提示行：顶部一行写“新开放了什么 / 现在可以试试什么 / 需要注意什么”，点一下可定位或打开对应内容。
- * 新手阶段：从开局到分化第一只侦察蜂（t_first_scout）；该阶段提示行常驻，之后只在有新内容或预警时出现。
+ * 情境式引导：新手阶段一次只给一个目标，解释原因，并把玩家直接带到可操作目标；
+ * 概念弹窗只在首次开局说明核心循环，避免操作提示和连续弹窗互相打断。
  */
 
 export class IntroTopic {
@@ -117,8 +114,8 @@ export const INTRO_TOPICS: IntroTopic[] = [
     '等待恢复倒计时结束，或采集另一片花丛。侦察蜂能寻找更多花源；侦察房的花源储量和恢复效率升级能缓解原料短缺。',
     'xf_flower_wild', 'field', 'field', (e: GameEngine) => e.run.map.fields.some((f: FlowerField) => f.depletedAt !== undefined)),
   // ---------------- 新手阶段（到第一只侦察蜂为止） ----------------
-  new IntroTopic('flowers', '花丛', '蜂巢旁的野花丛，是花蜜的来源。',
-    '先点花丛采蜜两次，熟悉采蜜后，按住花丛就能连续采集。花蜜会被蜂巢慢慢酿成蜂蜜。', 'xf_flower_wild', 'field', 'field',
+  new IntroTopic('flowers', '先认识蜂群的生产循环', '花丛产出花蜜，花蜜回到蜂巢后会被酿成蜂蜜。',
+    '先点发光的花丛完成第一次采集。之后跟着顶部的单步目标行动；每一步都会告诉你为什么要做。', 'xf_flower_wild', 'field', 'field',
     (e: GameEngine) => true),
   new IntroTopic('honey', '蜂蜜', '由花蜜酿成，是蜂群最重要的资源。',
     '产卵、建造、升级都要用到蜂蜜；顶部会显示数量和每秒增长。', 'xf_res_honey', '', '',
@@ -189,7 +186,7 @@ export const INTRO_TOPICS: IntroTopic[] = [
     '点开花田可以安排驻守蜜蜂：花田会恢复更快，并成长为更高级的花种。', 'xf_talent_e_pollen', '', 'field',
     (e: GameEngine) => e.w.unlocked('t_first_expand') && e.w.role(Role.Forager) > 1),
   new IntroTopic('winter', '冬天', '花田几乎停产，蜂群靠储备的蜂蜜过冬。',
-    '入冬前多建储蜜格、多存蜂蜜；第一个冬天受保护，只会降低产量。', 'xf_season_winter', '', '',
+    '首个冬季需要100蜂蜜，第二次需要300，之后每次增加100（最高2500）。入冬时储备不足，当前蜂巢会死亡并从零重建。', 'xf_season_winter', '', '',
     (e: GameEngine) => e.run.season.season === SeasonId.WinterPrep || e.run.season.season === SeasonId.Winter),
   new IntroTopic('jelly', '蜂王浆', '珍贵的稀有资源。', '来自稀有花田、蜂群任务、每日签到、连续击退敌害和击退熊，用于研究和特殊升级。',
     'xf_res_jelly', '', '', (e: GameEngine) => e.w.econ.num(Res.Jelly) > 0.001),
@@ -278,8 +275,10 @@ export class Guide {
   /** 下一条待介绍的新事物（按配置顺序，条件满足且未看过） */
   pendingIntro(): IntroTopic | null {
     this.syncLegacy();
+    const tutorialTopics = ['honey', 'queen', 'larva', 'scoutRoom', 'scout', 'foragerRoom', 'forager', 'brewery', 'house'];
     for (let i = 0; i < INTRO_TOPICS.length; i++) {
       const t = INTRO_TOPICS[i];
+      if (this.inTutorial() && tutorialTopics.includes(t.id)) continue;
       if (this.inTutorial() && ['storage', 'wax', 'seasons', 'expand', 'upgrade', 'nursery'].includes(t.id)) continue;
       if (!this.seen(t.id) && t.cond(this.eng)) {
         return t;
@@ -317,18 +316,20 @@ export class Guide {
           t_build_brewery: Bld.Brewery, t_build_forager: Bld.ForagerRoom, t_build_scout: Bld.ScoutRoom
         };
         const building = buildingByTask[step.doneTask];
-        let text = step.text;
+        let text = `第 ${e.state.meta.tutorialStep + 1}/${w.cfg.tutorial.length} 步 · ${step.title}：${step.text}`;
         let action = step.focus === 'hive' ? 'focus:hive@hive' : step.focus === 'queen' ? 'queen' : 'focus:field@field';
         if (building !== undefined) {
           const cost = e.hive.buildCost(building);
           const short = e.reasonsForShortage(cost);
-          text = short.length === 0 ? `蜂蜜够了：建造${w.bldDef(building).name}` : `${step.title} · ${short}。${step.text}`;
+          text = short.length === 0
+            ? `第 ${e.state.meta.tutorialStep + 1}/${w.cfg.tutorial.length} 步 · 资源已备齐：点这里建造${w.bldDef(building).name}`
+            : `第 ${e.state.meta.tutorialStep + 1}/${w.cfg.tutorial.length} 步 · 先准备资源：${short}。${step.text}`;
           action = short.length === 0 ? `build:${building}` : 'focus:field@field';
         } else if (step.focus === 'queen' && step.doneTask !== 't_first_egg') {
           const target = step.doneTask === 't_first_house' ? Role.House : step.doneTask === 't_first_forager' ? Role.Forager : Role.Scout;
           const batch = e.run.colony.batches.find((b) => b.targetRole === target);
-          if (batch) text = `${w.roleDef(target).name}分化中 · ${Math.ceil(Math.max(0, batch.finishAt - e.run.time))}秒`;
-          else if (e.run.colony.larvae === 0) text = `先手动孵化新卵，再选择分化为${w.roleDef(target).name}`;
+          if (batch) text = `第 ${e.state.meta.tutorialStep + 1}/${w.cfg.tutorial.length} 步 · ${w.roleDef(target).name}分化中，还需 ${Math.ceil(Math.max(0, batch.finishAt - e.run.time))} 秒`;
+          else if (e.run.colony.larvae === 0) text = `第 ${e.state.meta.tutorialStep + 1}/${w.cfg.tutorial.length} 步 · 先孵化新卵，再选择分化为${w.roleDef(target).name}`;
         }
         add(new Hint(step.id, text, 'next', action, building ? BLD_ICON[building] : 'xf_nav_tasks'));
       }
@@ -338,9 +339,6 @@ export class Guide {
     const bear = e.threats.pendingBear();
     if (bear !== null && bear.phase !== 'postponed') {
       add(new Hint('bear', '熊来了！点熊拍打、让守卫迎战，赶不走可能整个蜂巢都会被掀翻', 'warn', 'panel:eco', 'xf_enemy_bear'));
-    }
-    if (e.run.season.starving) {
-      add(new Hint('starving', '储蜜不足，蜂群效率减半：多采集或减少筑巢', 'warn', 'panel:resources', 'xf_status_insufficient'));
     }
     if (e.run.season.formal && (e.run.season.season === SeasonId.Autumn || e.run.season.season === SeasonId.WinterPrep)) {
       const need = e.season.winterNeed();

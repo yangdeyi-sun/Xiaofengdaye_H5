@@ -393,7 +393,7 @@ export interface SettingsState {
   privacyAccepted: boolean;
   privacyVersion: string;
   fontScaleSafe: boolean;
-  /** 默认跟随设备姿态；保留旧值只用于兼容历史存档。 */
+  /** 默认固定竖屏；玩家可在设置中切换横屏。auto 仅用于兼容历史存档。 */
   orientation: 'auto' | 'landscape' | 'portrait';
 }
 

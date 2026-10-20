@@ -159,7 +159,7 @@ const TRACKS: UpgradeTrackDef[] = [
   tr('house.wax', Bld.Brewery, 'house.waxRate', '筑巢效率', 0.12, 'pct', 20, [c(H, 50, 1.25), c(W, 6, 1.3)], []),
   tr('storage.cap', Bld.Storage, 'storage.capacity', '储存容量', 0.15, 'pct', 30, [c(H, 45, 1.25), c(W, 5, 1.3)], []),
   tr('storage.winter', Bld.Storage, 'storage.winterLoss', '越冬损耗', -0.05, 'pct', 12, [c(H, 50, 1.25)],
-    [kl(6, 'winter_guard', '冬季保护：储蜜不足时蜂群停工而非受伤')]),
+    [kl(6, 'winter_guard', '节俭越冬：达到储备门槛后，实际消耗再减少15%')]),
   tr('storage.buffer', Bld.Storage, 'storage.buffer', '溢出缓冲', 0.2, 'pct', 10, [c(H, 45, 1.25)], []),
   tr('guard.range', Bld.GuardRoom, 'guard.range', '巡逻范围', 0.1, 'pct', 20, [c(H, 45, 1.25), c(W, 6, 1.3)], []),
   tr('guard.attack', Bld.GuardRoom, 'guard.attack', '攻击效率', 0.15, 'pct', 25, [c(H, 50, 1.25), c(W, 6, 1.3)], []),
@@ -384,16 +384,16 @@ function tu(id: string, title: string, text: string, focus: string, doneTask: st
   return d;
 }
 
-// 先改善加工，再补采集与花源；首只侦察蜂完成后交还发展决策。
+// 每一步只教一个动作，同时说明“为什么做”和“做完会发生什么”；首只侦察蜂完成后交还发展决策。
 const TUTORIAL: TutorialStepDef[] = [
-  tu('tap', '采集花蜜', '先点击花丛采蜜两次，之后按住花丛就能连续采集。蜂巢酿蜜很慢，攒够18蜂蜜就去建酿蜜房。', 'field', 't_first_nectar'),
-  tu('brewery', '建造酿蜜房', '花蜜堆着酿不完？建造酿蜜房，酿蜜明显加快；酿蜜房越多越快。', 'hive', 't_build_brewery'),
-  tu('egg', '手动孵化', '打开蜂后页，点击孵化获得幼虫。每次孵化的新卵都会更贵。', 'queen', 't_first_egg'),
-  tu('house', '分化巢内工蜂', '选择将幼虫分化为巢内工蜂，进一步提高酿蜜能力。', 'queen', 't_first_house'),
-  tu('foragerRoom', '建造采集蜂巢房', '酿蜜变快，花蜜不够了。建造采集蜂巢房补充原料。', 'hive', 't_build_forager'),
-  tu('forager', '分化采集蜂', '手动孵化，再选择分化为采集蜂。采集蜂会自动运输花蜜。', 'queen', 't_first_forager'),
-  tu('scoutRoom', '建造侦察蜂巢房', '近处花丛有限，采空后需要恢复。建造侦察蜂巢房寻找更多花源。', 'hive', 't_build_scout'),
-  tu('scout', '分化侦察蜂', '手动孵化并分化第一只侦察蜂。升级侦察房可增加花源储量、缩短恢复等待。', 'queen', 't_first_scout')
+  tu('tap', '采集第一滴花蜜', '点发光的野花丛采蜜。花蜜会进入顶部资源栏，并由蜂巢缓慢酿成蜂蜜。', 'field', 't_first_nectar'),
+  tu('brewery', '让酿蜜更快', '攒够18蜂蜜后建造酿蜜房；它能解决花蜜堆积、蜂蜜增长太慢的问题。', 'hive', 't_build_brewery'),
+  tu('egg', '孵化第一枚卵', '打开蜂后页点“孵化新卵”。先得到幼虫，下一步再决定它的工种。', 'queen', 't_first_egg'),
+  tu('house', '培养巢内工蜂', '在蜂后页把幼虫分化为巢内工蜂；它会进一步提高酿蜜效率。', 'queen', 't_first_house'),
+  tu('foragerRoom', '准备自动采蜜', '建造采集蜂巢房，解锁采集蜂；这样就不用一直手动点击花丛。', 'hive', 't_build_forager'),
+  tu('forager', '培养采集蜂', '没有幼虫就先孵化新卵，再分化为采集蜂。它会自动往返花田运回花蜜。', 'queen', 't_first_forager'),
+  tu('scoutRoom', '寻找更多花田', '建造侦察蜂巢房。近处花丛会采空，侦察蜂能发现新的花源。', 'hive', 't_build_scout'),
+  tu('scout', '培养侦察蜂', '没有幼虫就先孵化新卵，再分化为侦察蜂。完成后蜂群已能自行采蜜和探索。', 'queen', 't_first_scout')
 ];
 
 export const DEFAULT_CONFIG: GameConfigDef = {

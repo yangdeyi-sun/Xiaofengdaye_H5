@@ -10,12 +10,16 @@ import { createInitialState } from '../domain/NewGame';
 import { GameEngine } from '../domain/GameEngine';
 import { buildHive } from '../domain/HiveService';
 import { decodeEnvelope, encodeEnvelope, toDTO, SaveEnvelope } from '../domain/SaveCodec';
+<<<<<<< Updated upstream
 import { Bld, Res, Role, ThreatPhase, ThreatType } from '../domain/Types';
 import { PresentationQueue } from '../app/PresentationQueue';
 import { costMulFor } from '../domain/HiveService';
 import { beeName, namePoolSize } from '../domain/BeeNames';
 import { STAR_TRAITS } from '../domain/RosterService';
 import { legacyAura } from '../domain/World';
+=======
+import { Bld, Res, Role, SeasonId, ThreatPhase, ThreatType } from '../domain/Types';
+>>>>>>> Stashed changes
 import { Guide, INTRO_TOPICS } from '../domain/Guide';
 import { softExponent } from '../domain/World';
 import { buildArtManifest } from '../scene/ArtManifest';
@@ -150,7 +154,7 @@ const rep = decodeEnvelope(JSON.stringify(envBad));
 ok(rep.ok && rep.state !== null && rep.state.run.colony.larvae === 0 && rep.state.run.res[Res.Honey].isZero() &&
   rep.state.run.colony.roles[Role.Forager] === 0, 'repair illegal values');
 ok(rep.state !== null && rep.state.meta.settings.musicVolume === 80 && rep.state.meta.settings.eventAnimations &&
-  rep.state.meta.settings.gameSpeed === 1 && rep.state.meta.settings.orientation === 'auto',
+  rep.state.meta.settings.gameSpeed === 1 && rep.state.meta.settings.orientation === 'portrait',
   'repair adds new settings defaults');
 
 // v2 -> v3：旧存档补齐方向与多蜂群容器
@@ -164,7 +168,7 @@ env2.payload = JSON.stringify(payload2);
 env2.checksum = checksum(env2.payload);
 const mig2 = decodeEnvelope(JSON.stringify(env2));
 ok(mig2.ok && mig2.state?.activeColonyId === 'colony-0' && mig2.state.colonies.length === 0 &&
-  mig2.state.meta.settings.orientation === 'auto', 'migrate v2 adds multi-colony and automatic orientation defaults');
+  mig2.state.meta.settings.orientation === 'portrait', 'migrate v2 adds multi-colony and portrait orientation defaults');
 
 // 已解锁巢格之间可无损移动或交换建筑
 const swapState = createInitialState(DEFAULT_CONFIG, 'swap', 0, 12);
@@ -427,9 +431,10 @@ winterDelay.run.time = 700;
 winterDelay.season.tick(0.1);
 ok(winterDelay.run.season.season === 'winterPrep', 'winter preparation starts normally after novice protection');
 
-// ---------- 首冬保护 ----------
+// ---------- 越冬阶梯与储备失败 ----------
 const s6 = decodeEnvelope(text).state!;
 const e6 = new GameEngine(DEFAULT_CONFIG, s6);
+<<<<<<< Updated upstream
 e6.run.res[Res.Honey] = BigNum.zero();
 e6.run.res[Res.Nectar] = BigNum.zero();
 e6.run.colony.roles[Role.Forager] = 300;
@@ -446,23 +451,35 @@ let starvedSeen = false;
 for (let i = 0; i < 600; i++) { e6.step(0.1); starvedSeen = starvedSeen || e6.run.season.starving; }
 ok(starvedSeen && e6.w.adults() === adults6, 'first winter: starving but no deaths/injury loss', `${e6.w.adults()}/${adults6}`);
 ok(e6.w.injured(Role.Forager) === 0, 'first winter protected: no injuries');
+=======
+ok(e6.season.winterNeed() === 100, 'first winter requires 100 honey');
+e6.run.colony.roles[Role.Forager] = 3;
+e6.run.hive.cells.find((cell) => cell.unlocked && cell.building === '')!.building = Bld.Storage;
+e6.run.season.formal = true;
+e6.run.season.season = SeasonId.WinterPrep;
+e6.run.season.endsAt = e6.run.time;
+e6.run.res[Res.Honey] = BigNum.of(99);
+e6.step(0.1);
+ok(e6.w.adults() === 0 && e6.w.count(Bld.Storage) === 0 && e6.w.econ.num(Res.Honey) === 0,
+  'insufficient winter reserve restarts resources, population and buildings from zero');
+ok(e6.state.messages.some((message) => message.text.includes('蜂巢死亡')),
+  'winter failure records a clear hive death message');
+>>>>>>> Stashed changes
 
-// ---------- 后续冬季链式衰败 ----------
-const decline = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'decline', 0, 27));
-decline.run.colony.roles[Role.House] = 10;
-decline.run.colony.hatched = 10;
-decline.run.tasksDone.push('t_first_house');
-decline.run.tasksClaimed.push('t_first_house');
-decline.season.startFormal();
-decline.run.season.season = 'winter';
-decline.run.season.endsAt = decline.run.time + 300;
-decline.run.season.firstWinterProtected = false;
-decline.run.res[Res.Honey] = BigNum.zero();
-decline.run.res[Res.Nectar] = BigNum.zero();
-for (let i = 0; i < 2000; i++) { decline.step(0.1); }
-ok(decline.run.season.starveSeconds >= 190 && decline.w.injured(Role.House) > 0,
-  'later winter applies warning and injury stages');
-ok(decline.w.adults() < 10 && decline.w.adults() > 0, 'long starvation causes gradual, non-instant losses');
+const winterSuccess = new GameEngine(DEFAULT_CONFIG, createInitialState(DEFAULT_CONFIG, 'winter-success', 0, 27));
+winterSuccess.run.season.formal = true;
+winterSuccess.run.season.season = SeasonId.WinterPrep;
+winterSuccess.run.season.endsAt = winterSuccess.run.time;
+winterSuccess.run.res[Res.Honey] = BigNum.of(100);
+winterSuccess.step(0.1);
+ok(winterSuccess.run.season.season === SeasonId.Winter && winterSuccess.w.econ.num(Res.Honey) === 0,
+  'successful winter entry consumes the full fixed reserve once');
+winterSuccess.run.season.wintersSurvived = 1;
+ok(winterSuccess.season.winterNeed() === 300, 'second winter requires 300 honey');
+winterSuccess.run.season.wintersSurvived = 2;
+ok(winterSuccess.season.winterNeed() === 400, 'later winters increase by 100 honey');
+winterSuccess.run.season.wintersSurvived = 50;
+ok(winterSuccess.season.winterNeed() === 2500, 'winter reserve requirement is capped at 2500 honey');
 
 
 // ---------- 引导：新事物介绍 + 提示行 ----------
@@ -475,7 +492,8 @@ ok(gd.pendingIntro() === null, 'guide: nothing else before first nectar', gd.pen
 ok(gd.hints(2).some((h) => h.id === 'tap'), 'guide: hint suggests collecting');
 g0.collect('f0', 1);
 for (let i = 0; i < 30; i++) { g0.step(0.1); }
-ok(gd.pendingIntro()?.id === 'honey', 'guide: honey intro after first nectar', gd.pendingIntro()?.id);
+ok(gd.pendingIntro() === null && gd.hints(2).some((hint) => hint.id === 'brewery' && hint.text.includes('第 2/8 步')),
+  'guide: tutorial advances with one contextual numbered goal instead of another popup', gd.pendingIntro()?.id);
 ok(new Set(INTRO_TOPICS.map((t) => t.id)).size === INTRO_TOPICS.length, 'guide: unique topic ids');
 const encG = encodeEnvelope(g0.state, DEFAULT_CONFIG.configVersion, 1);
 const decG = decodeEnvelope(encG).state!;

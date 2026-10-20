@@ -103,8 +103,9 @@ export class SeasonService {
   private w: World;
   onChange: (from: string, to: string) => void = () => {
   };
-  private starveTimer: number = 0;
-  private starveDeathTimer: number = 0;
+  /** 入冬储备不足时由 GameEngine 负责把当前蜂巢从零重建。 */
+  onWinterFailure: (need: number, have: number) => void = () => {
+  };
 
   constructor(w: World) {
     this.w = w;
@@ -184,6 +185,18 @@ export class SeasonService {
       if (to === SeasonId.Winter && this.w.s.run.stats.firstWinterAt < 0) {
         this.w.s.run.stats.firstWinterAt = s.endsAt;
       }
+      if (to === SeasonId.Winter) {
+        const need = this.winterNeed();
+        const have = this.w.econ.num(Res.Honey);
+        if (have + 1e-9 < need) {
+          this.onWinterFailure(need, have);
+          return;
+        }
+        const saving = this.w.attrs.get('storage.winterLoss') * (this.w.hasFlag('winter_guard') ? 0.85 : 1);
+        const spent = Math.min(need, need * Math.max(0, saving));
+        this.w.econ.drain(Res.Honey, spent, Reason.Winter, 'winter-reserve');
+        this.w.msg('season', `越冬储备已交付：门槛 ${Math.ceil(need)}，实际消耗 ${Math.ceil(spent)} 蜂蜜。`);
+      }
       s.season = to;
       s.startedAt = s.endsAt;
       s.endsAt = s.endsAt + Math.max(10, this.duration(to));
@@ -205,83 +218,20 @@ export class SeasonService {
     this.upkeep(dt);
   }
 
-  /** 冬季储备消耗（ECO-004）：不足时进入饥饿，首冬只降低产量；不产生负库存 */
+  /** 越冬储备在入冬时一次结算；冬季内不再重复扣费。 */
   private upkeep(dt: number): void {
     const s = this.w.s.run.season;
-    const sd = this.def(s.season);
-    if (sd.upkeep <= 0) {
-      if (s.starving) {
-        s.starving = false;
-        this.w.attrs.recompute();
-      }
-      this.starveTimer = 0;
-      this.starveDeathTimer = 0;
-      return;
-    }
-    const need = this.w.adults() * sd.upkeep * this.w.attrs.get('storage.winterLoss') * dt;
-    const got = this.w.econ.drain(Res.Honey, need, Reason.Winter, 'winter');
-    this.w.rates.upkeep += got;
-    const starving = got + 1e-9 < need * 0.95;
-    if (starving !== s.starving) {
-      s.starving = starving;
+    void dt;
+    if (s.starving || s.starveSeconds > 0) {
+      s.starving = false;
+      s.starveSeconds = 0;
       this.w.attrs.recompute();
-      if (starving) {
-        this.w.msg('warn', s.firstWinterProtected ? '储蜜不足：首个冬季受到保护，蜂群只会降低产量' : '储蜜不足：蜂群体力下降，部分蜜蜂暂停工作');
-      } else {
-        s.starveSeconds = 0;
-        this.starveTimer = 0;
-        this.starveDeathTimer = 0;
-        this.w.msg('info', '储蜜恢复，蜂群停止衰败并开始休养');
-      }
-    }
-    if (starving) {
-      const before = s.starveSeconds;
-      s.starveSeconds += dt;
-      if (!s.firstWinterProtected && before < 60 && s.starveSeconds >= 60) {
-        this.w.msg('warn', '持续饥饿：蜂后产卵与幼虫孵化速度下降');
-        this.w.attrs.recompute();
-      }
-      if (!s.firstWinterProtected && before < 150 && s.starveSeconds >= 150) {
-        this.w.msg('warn', '严重饥饿：若不补充蜂蜜，蜂群将开始缓慢减员');
-      }
-    }
-    // 后续冬季按阶段衰败：先受伤停工，持续饥饿后限制繁育，最后才缓慢减员。
-    if (starving && !s.firstWinterProtected && !this.w.offline && !this.w.hasFlag('winter_guard')) {
-      this.starveTimer += dt;
-      if (this.starveTimer >= 30) {
-        this.starveTimer = 0;
-        [Role.Forager, Role.House].forEach((r: string) => {
-          const n = Math.ceil(this.w.role(r) * 0.03);
-          const cap = Math.floor(this.w.role(r) * this.w.cfg.economy.injuryCapRatio);
-          this.w.s.run.colony.injured[r] = Math.min(cap, this.w.injured(r) + n);
-        });
-      }
-      if (s.starveSeconds >= 150) {
-        this.starveDeathTimer += dt;
-        if (this.starveDeathTimer >= 45) {
-          this.starveDeathTimer = 0;
-          const roles = [Role.Forager, Role.House, Role.Scout, Role.Guard];
-          for (let i = 0; i < roles.length; i++) {
-            const role = roles[i];
-            if (this.w.role(role) > 0) {
-              this.w.s.run.colony.roles[role] = this.w.role(role) - 1;
-              this.w.s.run.colony.injured[role] = Math.min(this.w.injured(role), this.w.role(role));
-              this.w.msg('warn', `长期缺蜜：1只${this.w.roleDef(role).name}死亡`);
-              break;
-            }
-          }
-          if (this.w.adults() <= 0 && this.w.s.run.colony.hatched > 0) {
-            this.w.s.run.colony.collapsed = true;
-            this.w.msg('error', '蜂群已经衰败，可消耗1点传承原地重启，或读取入冬前快照');
-          }
-        }
-      }
     }
   }
 
-  /** 预估过冬所需蜂蜜 */
+  /** 越冬阶梯：首冬 100，第二个冬季 300，此后每次 +100，最高 2500。 */
   winterNeed(): number {
-    return this.w.adults() * this.def(SeasonId.Winter).upkeep * this.duration(SeasonId.Winter) *
-      this.w.attrs.get('storage.winterLoss');
+    const survived = Math.max(0, Math.floor(this.w.s.run.season.wintersSurvived));
+    return survived === 0 ? 100 : Math.min(2500, 200 + survived * 100);
   }
 }

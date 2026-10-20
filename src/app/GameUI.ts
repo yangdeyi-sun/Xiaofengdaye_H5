@@ -145,10 +145,13 @@ function costStr(costs: CostAmount[]): string {
 }
 function regionArt(id: string): string { return id === 'rainy' ? 'wetland' : (id === 'drought' ? 'dryland' : id); }
 function button(action: string, label: string, options: {
-  id?: string; value?: string | number; disabled?: boolean; primary?: boolean; danger?: boolean; title?: string;
+  id?: string; value?: string | number; disabled?: boolean; disabledReason?: string;
+  primary?: boolean; danger?: boolean; title?: string;
 } = {}): string {
-  const classes = ['btn', options.primary ? 'primary' : 'ghost', options.danger ? 'danger' : ''].filter(Boolean).join(' ');
-  return `<button type="button" class="${classes}" data-action="${h(action)}"${options.id === undefined ? '' : ` data-id="${h(options.id)}"`}${options.value === undefined ? '' : ` data-value="${h(options.value)}"`}${options.disabled ? ' disabled' : ''}${options.title === undefined ? '' : ` title="${h(options.title)}"`}>${label}</button>`;
+  const disabled = options.disabled === true;
+  const classes = ['btn', options.primary ? 'primary' : 'ghost', options.danger ? 'danger' : '', disabled ? 'disabled' : ''].filter(Boolean).join(' ');
+  const reason = options.disabledReason ?? options.title ?? '当前条件尚未满足，请查看按钮旁的资源、等级或时间要求';
+  return `<button type="button" class="${classes}" data-action="${h(action)}"${options.id === undefined ? '' : ` data-id="${h(options.id)}"`}${options.value === undefined ? '' : ` data-value="${h(options.value)}"`}${disabled ? ` aria-disabled="true" data-disabled-reason="${h(reason)}"` : ''}${options.title === undefined ? '' : ` title="${h(options.title)}"`}>${label}</button>`;
 }
 function panelCard(body: string, danger = false): string { return `<section class="panel-card${danger ? ' danger-card' : ''}">${body}</section>`; }
 /** 把提示文字归成一类：去掉引号里的名字和数字，只取开头几个字 */
@@ -205,6 +208,7 @@ export class GameUI {
   private eventText = '';
   private eventIcon = '';
   private toastText = '';
+  private toastError = false;
   private toastUntil = 0;
   private confirmState: ConfirmState | null = null;
   private focusTarget = '';
@@ -887,7 +891,7 @@ export class GameUI {
       }
     }
     if (bear === null || bear.phase !== 'warning') this.bearModal = false;
-    if (this.toastText.length > 0 && now >= this.toastUntil) this.toastText = '';
+    if (this.toastText.length > 0 && now >= this.toastUntil) { this.toastText = ''; this.toastError = false; }
     let notice = this.session.popNotice();
     while (notice !== null) {
       if (notice.kind === 'error') {
@@ -1015,7 +1019,7 @@ export class GameUI {
   }
 
   private showToast(text: string, error = false): void {
-    this.toastText = text; this.toastUntil = Date.now() + 2600;
+    this.toastText = text; this.toastError = error; this.toastUntil = Date.now() + 2600;
     if (error) this.session.audio.play('ui_error');
   }
 
@@ -1025,7 +1029,7 @@ export class GameUI {
   } = {}): string {
     const check = this.session.ads.check(placement, options.need ?? 1);
     const note = check.ok ? `今日剩余 ${check.remaining}` : check.reason;
-    return `<button type="button" class="btn ad-btn ${options.primary === false ? 'ghost' : 'primary'}" data-action="${h(action)}"${options.id === undefined ? '' : ` data-id="${h(options.id)}"`}${options.value === undefined ? '' : ` data-value="${h(options.value)}"`}${check.ok ? '' : ' disabled'}><span class="ad-tag">广告</span><span class="ad-label">${label}<small>${h(note)}</small></span></button>`;
+    return `<button type="button" class="btn ad-btn ${options.primary === false ? 'ghost' : 'primary'}${check.ok ? '' : ' disabled'}" data-action="${h(action)}"${options.id === undefined ? '' : ` data-id="${h(options.id)}"`}${options.value === undefined ? '' : ` data-value="${h(options.value)}"`}${check.ok ? '' : ` aria-disabled="true" data-disabled-reason="${h(note)}"`}><span class="ad-tag">广告</span><span class="ad-label">${label}<small>${h(note)}</small></span></button>`;
   }
 
   /** 播放激励视频，看完后执行 reward；未看完或无广告时只提示，不扣任何东西 */
@@ -1046,7 +1050,7 @@ export class GameUI {
 
   private feedback(result: CmdResult): void {
     this.showToast(result.message, !result.ok);
-    this.session.audio.play(result.ok ? 'ui_confirm' : 'ui_error');
+    if (result.ok) this.session.audio.play('ui_confirm');
   }
 
   private autoFocus(): string {
@@ -1140,10 +1144,7 @@ export class GameUI {
   }
 
   private resourceList(): string[] {
-    const e = this.engine();
-    return ALL_RES.filter((res) => res === Res.Nectar || res === Res.Honey ||
-      (res === Res.Wax && e.w.unlocked('t_build_storage')) ||
-      (res === Res.Jelly && e.w.econ.num(Res.Jelly) > 0.001));
+    return ALL_RES;
   }
 
   private resourceRate(res: string): string {
@@ -1189,7 +1190,7 @@ export class GameUI {
       const flow = Math.max(0, this.rateOf(res)) * Math.max(0.25, (now - seen.at) / 1000);
       if (value - seen.value >= Math.max(1, flow * 3)) seen.bumpUntil = now + 450;
       seen.value = value; seen.at = now; this.resSeen[res] = seen;
-      return `<div class="resource-chip${full ? ' full' : ''}${now < seen.bumpUntil ? ' bump' : ''}">${icon(resIcon(res), resName(res))}<span><b>${formatBig(e.w.econ.amount(res))}</b>${rate.length > 0 ? `<small>${h(rate)}</small>` : ''}</span></div>`;
+      return `<div class="resource-chip${full ? ' full' : ''}${now < seen.bumpUntil ? ' bump' : ''}">${icon(resIcon(res), resName(res))}<span><small class="resource-name">${h(resName(res))}</small><b>${formatBig(e.w.econ.amount(res))}</b><small class="resource-rate">${rate.length > 0 ? h(rate) : '暂无变化'}</small></span></div>`;
     }).join('');
     const boost = this.session.ads.boostSpeed();
     const boostChip = boost > 1
@@ -1497,15 +1498,16 @@ export class GameUI {
       const preview = e.previewUpgrade(track.id);
       const maxed = preview.level >= preview.maxLevel;
       const value = maxed
-        ? `Lv${preview.level}（满级） 当前 ${num1(preview.cur)}${preview.unit}`
-        : `Lv${preview.level} → ${preview.level + 1}　${num1(preview.cur)} → ${num1(preview.next)} ${preview.unit}`;
+        ? `<div class="upgrade-level"><b>Lv${preview.level}</b><em>已满级</em></div><div class="upgrade-value"><span>当前 <b>${num1(preview.cur)}${h(preview.unit)}</b></span></div>`
+        : `<div class="upgrade-level"><b>Lv${preview.level}</b><i>→</i><b>Lv${preview.level + 1}</b></div><div class="upgrade-value"><span>当前 <b>${num1(preview.cur)}${h(preview.unit)}</b></span><i>→</i><span>升级后 <b>${num1(preview.next)}${h(preview.unit)}</b></span></div>`;
       const delta = Math.abs(preview.honeyPerMinDelta) >= 0.05
         ? `预计蜂蜜产量 ${preview.honeyPerMinDelta >= 0 ? '+' : ''}${num1(preview.honeyPerMinDelta)}/分钟 · ` : '';
       const statIcon = track.id === 'scout.quality' ? 'xf_stat_scout_stock' : `xf_stat_${track.id.replace('.', '_')}`;
       const rangeNote = track.id === 'scout.range' ? `<em class="key-note">当前探索圈半径 ${Math.round(preview.cur)}，升级后 ${Math.round(preview.next)}；圈外花丛需继续升级后才能发现</em>` : '';
       const topUp = maxed || preview.affordable ? 0 : honeyTopUp(e, preview.costs);
       const topUpButton = topUp > 0 ? `<div class="topup-row">${this.adButton('ad-topup', `补齐 ${topUp} 蜂蜜并升级`, AdPlacement.HoneyTopUp, { id: track.id, value: topUp, primary: false })}</div>` : '';
-      return panelCard(`<div class="card-head">${icon(statIcon)}<div><h3>${h(preview.name)}</h3><p>${h(value)}</p><small>${h(`${delta}升级消耗 ${costStr(preview.costs)}`)}</small>${rangeNote}${preview.keyNote.length > 0 ? `<em class="key-note">关键节点 ${h(preview.keyNote)}</em>` : ''}</div>${button('upgrade', '升级', { id: track.id, primary: true, disabled: maxed || !preview.affordable })}</div>${topUpButton}`);
+      const disabledReason = maxed ? '该属性已经达到最高等级' : `资源不足：升级需要 ${costStr(preview.costs)}`;
+      return panelCard(`<div class="card-head">${icon(statIcon)}<div><h3>${h(preview.name)}</h3>${value}<small>${h(`${delta}升级消耗 ${costStr(preview.costs)}`)}</small>${rangeNote}${preview.keyNote.length > 0 ? `<em class="key-note">关键节点 ${h(preview.keyNote)}</em>` : ''}</div>${button('upgrade', '升级', { id: track.id, primary: true, disabled: maxed || !preview.affordable, disabledReason })}</div>${topUpButton}`);
     }).join('');
   }
 
@@ -1519,7 +1521,9 @@ export class GameUI {
       const can = available && colony.larvae > 0 && e.w.econ.canAfford(e.colony.roleCost(role));
       const line = available ? `拥有 ${e.w.role(role)} · ${costStr(e.colony.roleCost(role))} · 孵化 ${Math.ceil(e.colony.hatchTime(role))} 秒`
         : `需要先建造${e.w.bldDef(def.building).name}`;
-      return panelCard(`<div class="card-head">${icon(roleIcon(role))}<div><h3>${h(def.name)}</h3><p>${h(line)}</p><small>${h(def.desc)}</small></div><div class="button-pair">${button('hatch', '×1', { id: role, value: 1, primary: true, disabled: !can })}${button('hatch', '×5', { id: role, value: 5, disabled: !can })}</div></div>`);
+      const disabledReason = !available ? `需要先建造${e.w.bldDef(def.building).name}`
+        : colony.larvae <= 0 ? '没有幼虫：请先点击“孵化新卵”' : `资源不足：培养需要 ${costStr(e.colony.roleCost(role))}`;
+      return panelCard(`<div class="card-head">${icon(roleIcon(role))}<div><h3>${h(def.name)}</h3><p>${h(line)}</p><small>${h(def.desc)}</small></div><div class="button-pair">${button('hatch', '×1', { id: role, value: 1, primary: true, disabled: !can, disabledReason })}${button('hatch', '×5', { id: role, value: 5, disabled: !can, disabledReason })}</div></div>`);
     }).join('');
     const batches = colony.batches.length === 0 ? '<p class="muted">队列为空</p>' : colony.batches.slice(0, 12).map((batch) => {
       const text = batch.started
@@ -1528,7 +1532,11 @@ export class GameUI {
       return `<div class="compact-row">${icon(roleIcon(batch.targetRole))}<span>${h(text)}</span>${button('cancel-batch', batch.started ? '取消（返还50%）' : '取消', { id: String(batch.batchId) })}</div>`;
     }).join('');
     const canLay = e.colony.canLay();
+<<<<<<< Updated upstream
     return this.panelFrame('蜂后与幼虫', 'xf_nav_queen', `<p>蜂群 ${e.w.population()} / ${e.w.popCap()}（成年 ${e.w.adults()}，幼虫 ${colony.larvae}，孵化中 ${e.w.inHatch()}）</p>${this.renderBreedPlan()}<div class="action-line">${button('lay', '孵化新卵', { primary: true, disabled: !canLay.ok })}<span>孵化新卵消耗 ${h(costStr(e.colony.eggCost()))}${colony.layCooldown > 0 ? ` · 休息 ${Math.ceil(colony.layCooldown)} 秒` : ''}</span></div>${!canLay.ok ? `<p class="warning">${h(canLay.message)}</p>` : ''}<p class="muted">每次点击孵化获得幼虫，然后选择工种分化。新卵费用随累计孵化次数递增。开启繁育计划后蜂后会自动繁育（离线也会），手动孵化和分化随时可以插队。</p><p class="muted">${icon('xf_status_rare')} 每孵化一只，有 ${pct(e.roster.starChance())} 的概率额外诞生一只明星蜂${(colony.luckyHatch ?? 0) > 0 ? `（幸运孵化还剩 ${colony.luckyHatch} 只）` : ''}${(e.kingdom.state().starEggs ?? 0) > 0 ? ` · 明星蜂卵 ${e.kingdom.state().starEggs} 颗，下次必出` : ''}。</p>${(colony.luckyHatch ?? 0) <= 0 ? this.adButton('ad-lucky', `幸运孵化：接下来 ${LUCKY_HATCHES} 只更容易出明星蜂`, AdPlacement.LuckyHatch, { primary: false }) : ''}<hr><h3 class="section-title">选择幼虫分化工种</h3>${roleCards}${e.w.unlocked('t_survive_winter') || e.state.meta.swarmCount > 0 ? this.renderQueenRearCard() : ''}<hr><h3 class="section-title">孵化队列 ${colony.batches.filter((batch) => batch.started).length} / ${e.colony.hatchSlots()}</h3>${batches}<hr><h3 class="section-title">蜂后室升级</h3>${this.renderUpgradeList(Bld.Queen)}`);
+=======
+    return this.panelFrame('蜂后与幼虫', 'xf_nav_queen', `<p>蜂群 ${e.w.population()} / ${e.w.popCap()}（成年 ${e.w.adults()}，幼虫 ${colony.larvae}，孵化中 ${e.w.inHatch()}）</p>${this.renderBreedPlan()}<div class="action-line">${button('lay', '孵化新卵', { primary: true, disabled: !canLay.ok, disabledReason: canLay.message })}<span>孵化新卵消耗 ${h(costStr(e.colony.eggCost()))}${colony.layCooldown > 0 ? ` · 休息 ${Math.ceil(colony.layCooldown)} 秒` : ''}</span></div>${!canLay.ok ? `<p class="warning">${h(canLay.message)}</p>` : ''}<p class="muted">每次点击孵化获得幼虫，然后选择工种分化。新卵费用随累计孵化次数递增。开启繁育计划后蜂后会自动繁育（离线也会），手动孵化和分化随时可以插队。</p><hr><h3 class="section-title">选择幼虫分化工种</h3>${roleCards}<hr><h3 class="section-title">孵化队列 ${colony.batches.filter((batch) => batch.started).length} / ${e.colony.hatchSlots()}</h3>${batches}<hr><h3 class="section-title">蜂后室升级</h3>${this.renderUpgradeList(Bld.Queen)}`);
+>>>>>>> Stashed changes
   }
 
   /** 繁育计划卡片：开关、各工种比例、保留蜂蜜 */
@@ -1758,7 +1766,12 @@ export class GameUI {
     const pollUnlocked = e.w.unlocked('t_build_storage') && e.w.role(Role.Forager) > 1;
     const poll = e.run.colony.pollinators[field.fieldId] ?? 0;
     const maxPoll = Math.max(1, Math.min(30, Math.floor(e.w.active(Role.Forager) * 0.5)));
+<<<<<<< Updated upstream
     return this.panelFrame(def.name, flowerIcon(field.flower), `${expired ? `<p class="warning">${icon('xf_field_expired')} 信息已过期</p>` : ''}${withered ? `<p class="muted">${icon('xf_field_withered')} ${e.run.season.season === SeasonId.Winter ? '冬季休眠：花蜜几乎不再恢复' : '花蜜快被采空了，可以等待恢复或寻找更多花源'}</p>` : ''}${this.fieldLines(field).map((line) => `<p>${h(line)}</p>`).join('')}${button('collect-field', e.map.recoveryRemaining(field) > 0 ? `恢复中 ${Math.ceil(e.map.recoveryRemaining(field))}秒` : '采集一次', { primary: true, disabled: e.map.recoveryRemaining(field) > 0 })}${pollUnlocked ? `<hr><h3 class="section-title">${icon('xf_talent_e_pollen')} 授粉特化：驻守 ${poll} 只采集蜂</h3><div class="poll-row">${button('poll-step', '−', { id: field.fieldId, value: poll - 1, disabled: poll <= 0 })}${this.range('pollinators', field.fieldId, poll, 0, maxPoll, 1, '驻守采集蜂')}${button('poll-step', '+', { id: field.fieldId, value: poll + 1, disabled: poll >= maxPoll })}</div>${this.pollProgress(field)}<p class="muted">驻守的采集蜂不运蜜，但会提高花田恢复速度并让它成长为更高级的花田（会吸引更强敌害）。最多派出能干活的采集蜂的一半。</p>` : ''}`);
+=======
+    const recovery = e.map.recoveryRemaining(field);
+    return this.panelFrame(def.name, flowerIcon(field.flower), `${expired ? `<p class="warning">${icon('xf_field_expired')} 信息已过期</p>` : ''}${withered ? `<p class="muted">${icon('xf_field_withered')} ${e.run.season.season === SeasonId.Winter ? '冬季休眠：花蜜几乎不再恢复' : '花蜜快被采空了，可以等待恢复或寻找更多花源'}</p>` : ''}${this.fieldLines(field).map((line) => `<p>${h(line)}</p>`).join('')}${button('collect-field', recovery > 0 ? `恢复中 ${Math.ceil(recovery)}秒` : '采集一次', { primary: true, disabled: recovery > 0, disabledReason: `花丛正在恢复，还需 ${Math.ceil(recovery)} 秒` })}${pollUnlocked ? `<hr><h3 class="section-title">${icon('xf_talent_e_pollen')} 授粉特化：驻守 ${poll} 只采集蜂</h3>${this.range('pollinators', field.fieldId, poll, 0, maxPoll, 1, '驻守采集蜂')}<p class="muted">驻守的采集蜂不运蜜，但会提高花田恢复速度并让它成长为更高级的花田（会吸引更强敌害）。</p>` : ''}`);
+>>>>>>> Stashed changes
   }
 
   private renderEcoPanel(): string {
@@ -1775,10 +1788,12 @@ export class GameUI {
     if (season.formal) {
       const need = e.season.winterNeed();
       const have = e.w.econ.num(Res.Honey);
-      effects.push(`预计越冬需要 ${Math.ceil(need)} 蜂蜜，当前储备 ${Math.floor(have)}（${have >= need ? '充足' : '不足'}）`);
-      effects.push(`已度过冬季 ${season.wintersSurvived} 次${season.firstWinterProtected ? ' · 首个冬季受保护：只降低产量' : ''}`);
+      const saving = e.w.attrs.get('storage.winterLoss') * (e.w.hasFlag('winter_guard') ? 0.85 : 1);
+      const spent = Math.min(need, need * Math.max(0, saving));
+      effects.push(`下次越冬需要 ${Math.ceil(need)} 蜂蜜，当前储备 ${Math.floor(have)}（${have >= need ? '充足' : '不足'}）`);
+      if (spent + 0.5 < need) effects.push(`储蜜技术生效：达到门槛后实际消耗约 ${Math.ceil(spent)} 蜂蜜`);
+      effects.push(`已度过冬季 ${season.wintersSurvived} 次 · 入冬时一次扣除储备；不足则蜂巢死亡并从零开始`);
     }
-    if (season.starving) effects.push('当前储蜜不足：采集与加工效率减半');
     const collapsed = e.run.colony.collapsed ? panelCard(`<h3 class="danger-text">蜂群衰败</h3><p>存档仍然保留。可以消耗1点传承在当前种区重启，或读取最近一次入冬前快照。</p><div class="choice-stack">${this.adButton('ad-revive', '免费重振蜂群（不消耗传承）', AdPlacement.ColonyRevive)}${button('recover-colony', '消耗1点传承重启', { primary: false })}${button('restore-winter', '读取入冬前快照')}</div>`, true) : '';
     const supply = winterSupplyWanted(e) ? panelCard(`<h3>${icon('xf_season_winter_prep')} 储备告急</h3><p>邻近蜂巢愿意支援一批蜂蜜（约 ${Math.round(winterSupplyAmount(e))}），帮你熬过这个冬天。</p>${this.adButton('ad-winter-supply', '领取紧急补给', AdPlacement.WinterSupply)}`) : '';
     const guardsByArea = e.threats.guardsByArea;
@@ -1813,6 +1828,7 @@ export class GameUI {
         ? `<p class="muted">熊：建成采集蜂巢房后不定时出没（冬季将至和冬天都在冬眠）。赶走它有蜂王浆；赶不走 ${Math.round(BEAR_DESTROY_CHANCE * 100)}% 整个蜂巢被掀翻、其余时候上缴蜂蜜。</p>` : '';
       threatSection = `<h3 class="section-title">${icon('xf_status_danger')} 敌害</h3><p>${h(guardLine)}</p>${lethalLine}${bearLine}${threats.length > 1 ? `<p class="warning">同时存在 ${threats.length} 个敌害，守卫会分区，单个目标获得的攻击力下降。</p>` : ''}${injured > 0 ? `<p class="muted">${icon('xf_status_injured')} 受伤休养中的工蜂 ${injured} 只，会逐渐恢复。</p>` : ''}${(e.run.threats.streak ?? 0) > 0 ? `<p class="ok">连续击退 ${e.run.threats.streak} 次 · 再击退 ${5 - (e.run.threats.streak ?? 0) % 5} 次额外得 1 蜂王浆</p>` : ''}${threats.length === 0 ? `${artImage('state_no_threats', '没有威胁', 'empty-art')}<p class="ok">目前没有威胁</p>` : threatCards}<p class="muted">新手结束后每隔几分钟出现一只，夏季最多、冬季很少。点地图上的敌害可以亲手驱赶，奖励随蜂巢产量增长；有敌害自己溜走会中断连胜。离线期间不会生成新敌害、不会死蜂，也不会发生熊袭击。</p>`;
     }
+<<<<<<< Updated upstream
     const starving = season.starving ? `<p class="warning">${icon('xf_status_stopped')} ${season.starveSeconds >= 150 ? '严重饥饿：蜂群正在缓慢减员' : (season.starveSeconds >= 60 ? '持续饥饿：产卵与孵化受限' : '部分蜜蜂因缺蜜暂停工作')}</p>` : '';
     const timed = e.events.effects();
     const timedHtml = timed.length === 0 ? '' : `<h3 class="section-title">${icon('xf_card_season')} 进行中的季节效果</h3>${timed.map((fx) => `<p class="${fx.mul >= 1 ? 'ok' : 'warning'}">${h(fx.label)}：${h(e.w.cfg.stats.find((st) => st.id === fx.stat)?.name ?? fx.stat)} ×${fx.mul} · 还剩 ${clock(fx.until - e.run.time)}</p>`).join('')}`;
@@ -1820,6 +1836,9 @@ export class GameUI {
     const raidLine = e.run.season.cycleIndex < 1 && raidState === undefined ? '<p class="muted">蜂巢保卫战：度过第一个冬天后，每个秋天会有胡蜂窝来袭。</p>'
       : `<p class="muted">蜂巢保卫战：每个秋天一次${raidState !== undefined ? ` · 本轮${raidState.cycle === e.run.season.cycleIndex ? (raidState.phase === 'won' ? '已胜利' : raidState.phase === 'lost' ? '没守住' : raidState.phase === 'skipped' ? '错过了' : '进行中') : '还没开始'}` : ''} · 累计胜利 ${e.state.meta.raidWins ?? 0} 次</p>`;
     return this.panelFrame('四季与防御', 'xf_nav_ecology', `<div class="heading-line">${icon(seasonIcon(season.season))}<h3>${h(seasonLine)}</h3></div>${effects.map((line) => `<p>${h(line)}</p>`).join('')}${timedHtml}${raidLine}${starving}${supply}${collapsed}<hr>${threatSection}`);
+=======
+    return this.panelFrame('四季与防御', 'xf_nav_ecology', `<div class="heading-line">${icon(seasonIcon(season.season))}<h3>${h(seasonLine)}</h3></div>${effects.map((line) => `<p>${h(line)}</p>`).join('')}${supply}${collapsed}<hr>${threatSection}`);
+>>>>>>> Stashed changes
   }
 
   private renderEvolutionPanel(): string {
@@ -2111,7 +2130,8 @@ export class GameUI {
       `<div class="setting-row">${icon(rowIcon)}<span><b>${h(label)}</b>${desc.length > 0 ? `<small>${h(desc)}</small>` : ''}</span>${this.toggleButton(key, on)}</div>`;
     const skins = e.w.cfg.skins.filter((skin: SkinDef) => e.state.meta.skins.includes(skin.id)).map((skin) =>
       `<button type="button" class="skin-choice${settings.skin === skin.id ? ' selected' : ''}" data-action="set-skin" data-id="${h(skin.id)}">${artImage(`skin_background_${skin.id}`, skin.name)}<span>${h(skin.name)}</span></button>`).join('');
-    const orientation = `<div class="setting-row">${icon('xf_action_refresh')}<span><b>屏幕方向</b><small>自动跟随手机姿态：横握显示横屏，竖握显示竖屏</small></span><b class="ok">自动</b></div>`;
+    const portrait = settings.orientation !== 'landscape';
+    const orientation = `<div class="setting-row">${icon('xf_action_refresh')}<span><b>屏幕方向</b><small>默认固定竖屏；需要横屏时在这里切换，重启后仍会保留</small></span><div class="button-pair">${button('set-orientation', '竖屏', { id: 'portrait', primary: portrait })}${button('set-orientation', '横屏', { id: 'landscape', primary: !portrait })}</div></div>`;
     return this.panelFrame('设置', 'xf_nav_settings', `<h3 class="section-title">音画</h3>${orientation}${toggleRow('music', '背景音乐', '', settings.music, 'xf_action_music')}${toggleRow('sfx', '音效', '', settings.sfx, 'xf_action_sound')}${this.range('volume', 'musicVolume', settings.musicVolume, 0, 100, 5, `音乐音量 ${settings.musicVolume}%`)}${this.range('volume', 'effectsVolume', settings.effectsVolume, 0, 100, 5, `音效音量 ${settings.effectsVolume}%`)}${toggleRow('vibration', '振动', '浏览器和设备支持时使用', settings.vibration, 'xf_action_vibration')}${toggleRow('particles', '粒子特效', '关闭可降低功耗', settings.particles, 'xf_status_rare')}${toggleRow('reduceMotion', '减少动态效果', '降低动画速度与天气粒子', settings.reduceMotion, 'xf_action_pause')}${toggleRow('eventAnimations', '事件动画', '敌害与季节更替的非阻塞通告', settings.eventAnimations, 'xf_card_alarm')}${toggleRow('lowPower', '省电模式', '画面降为 30 帧、使用半尺寸美术', this.session.lowPower, 'xf_action_low_power')}<hr><h3 class="section-title">玩法</h3><div class="setting-row"><span><b>花潮加速</b><small>${this.session.ads.boostSpeed() > 1 ? `${this.session.ads.boostSpeed()}× 进行中，剩余 ${clock(this.session.ads.boostRemainingSec())}` : `看 1 个广告 2×，看 2 个广告 4×，持续 ${AD_REWARDS.boostMinutes} 分钟`}</small></span>${button('open-boost', '⚡ 加速')}</div>${toggleRow('ecoMode', '生态模式（工蜂寿命）', '开启后工蜂会自然老化，需要手动孵化并分化补员', settings.ecoMode, 'xf_nav_ecology')}<h3 class="section-title">蜂巢外观</h3><div class="skin-grid">${skins}</div><hr><h3 class="section-title">${icon('xf_action_help')} 帮助与说明</h3><div class="choice-row">${button('open-legal', '玩法帮助', { id: 'help' })}${button('open-legal', '隐私政策', { id: 'privacy' })}${button('open-legal', '用户协议', { id: 'agreement' })}</div><hr>${this.renderSaveBackup()}<h3 class="section-title">数据与隐私</h3><p class="muted">进度保存在本设备。清除进度会重新开始；删除全部数据会同时清除设置与隐私同意记录。</p><div class="choice-row">${button('confirm-reset-progress', '清除游戏进度', { danger: true })}${button('confirm-delete-all', `${icon('xf_action_delete')} 删除全部数据`, { danger: true })}</div><div class="about-row">${artImage('logo_mark', '小峰大业')}${artImage('app_icon', '应用图标')}<span><b>小峰大业</b><small>版本 0.5.1</small></span>${button('save-now', `${icon('xf_status_save')} 立即保存`)}</div><div class="choice-row home-row">${button('exit-home', `${icon('xf_action_back')} 保存并返回首页`)}</div>`);
   }
 
@@ -2306,7 +2326,7 @@ export class GameUI {
       const topic = this.session.guide().topic(this.introId);
       if (topic !== null) return this.renderIntroOverlay(topic);
     }
-    if (this.toastText.length > 0) return `<button class="toast" data-action="dismiss-toast">${h(this.toastText)}</button>`;
+    if (this.toastText.length > 0) return `<button class="toast${this.toastError ? ' error' : ''}" data-action="dismiss-toast">${h(this.toastText)}</button>`;
     if (this.banner.length > 0) return `<button class="event-banner ${h(this.bannerKind)}" data-action="banner-click">${icon(this.bannerIcon())}<span>${h(this.banner)}</span></button>`;
     if (this.eventTitle.length > 0) return `<button class="season-event" data-action="close-event">${icon(this.eventIcon)}<span><b>${h(this.eventTitle)}</b><small>${h(this.eventText)}</small></span></button>`;
     return '';
@@ -2315,7 +2335,12 @@ export class GameUI {
   private onClick(event: Event): void {
     if (!(isUiElement(event.target))) return;
     const target = event.target.closest<HTMLElement>('[data-action]');
-    if (target === null || target.hasAttribute('disabled')) return;
+    if (target === null) return;
+    if (target.hasAttribute('disabled') || target.getAttribute('aria-disabled') === 'true') {
+      this.showToast(target.dataset.disabledReason ?? '当前操作暂不可用，请检查资源、等级或等待时间', true);
+      this.refreshGame(true);
+      return;
+    }
     const action = target.dataset.action ?? '';
     const id = target.dataset.id ?? '';
     const value = target.dataset.value ?? '';
@@ -2507,6 +2532,14 @@ export class GameUI {
       case 'claim-overflow': this.feedback(e.claimOverflow()); break;
       case 'codex-tab': this.codexTab = id; break;
       case 'toggle-setting': this.toggleSetting(id); return;
+      case 'set-orientation': {
+        const orientation = id === 'landscape' ? 'landscape' : 'portrait';
+        void this.session.setOrientation(orientation).then((applied) => {
+          this.showToast(applied ? `已切换为${orientation === 'portrait' ? '竖屏' : '横屏'}` : '当前浏览器不支持锁定屏幕方向，请在系统设置中调整', !applied);
+          this.refreshGame(true);
+        });
+        return;
+      }
       case 'open-boost': this.boostModal = true; this.session.audio.play('ui_open_panel'); break;
       case 'close-boost': this.boostModal = false; break;
       case 'ad-boost': {
@@ -2666,7 +2699,7 @@ export class GameUI {
         pending?.run();
         break;
       }
-      case 'dismiss-toast': this.toastText = ''; break;
+      case 'dismiss-toast': this.toastText = ''; this.toastError = false; break;
       default: return;
     }
     this.refreshGame(true);

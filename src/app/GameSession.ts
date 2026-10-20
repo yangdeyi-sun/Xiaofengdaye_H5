@@ -170,9 +170,10 @@ export class GameSession {
     this.audio.vibrateOn = settings.vibration;
     this.audio.setMusic(settings.music);
     this.audio.setVolumes(settings.musicVolume / 100, settings.ambientVolume / 100, settings.effectsVolume / 100);
-    // 画面始终跟随设备姿态，横握为横屏、竖握为竖屏，不再保存手动锁定。
-    settings.orientation = 'auto';
-    void platform().setOrientation?.('auto');
+    // 默认固定竖屏，并应用玩家在设置中保存的横/竖屏选择。
+    const orientation = settings.orientation === 'landscape' ? 'landscape' : 'portrait';
+    settings.orientation = orientation;
+    void platform().setOrientation?.(orientation);
   }
 
   async setOrientation(orientation: 'auto' | 'landscape' | 'portrait'): Promise<boolean> {
