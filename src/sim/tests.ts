@@ -678,11 +678,27 @@ if (legacyState !== null) {
   te.run.threats.nextSpawnAt = 1e9;
   te.run.threats.active.push({ eventId: 'tap1', type: ThreatType.Web, targetId: f.fieldId,
     phase: ThreatPhase.Active, hp: 30, maxHp: 30, startedAt: 0, endsAt: 0, postponed: 0, settled: false });
+  const probe = { eventId: 'combo-probe', type: ThreatType.Wasp, targetId: f.fieldId,
+    phase: ThreatPhase.Active, hp: 1000, maxHp: 1000, startedAt: 0, endsAt: 0, postponed: 0, settled: false };
+  te.run.threats.active.push(probe);
+  for (let i = 0; i < 4; i++) { te.run.time += 0.2; te.swatThreat(probe.eventId); }
+  const beforeCritical = probe.hp;
+  ok(!te.swatThreat(probe.eventId).ok, 'throttled taps do not advance combo');
+  te.run.time += 0.2;
+  const criticalHit = te.swatThreat(probe.eventId);
+  ok(criticalHit.message.includes('暴击') && Math.abs(beforeCritical - probe.hp - te.threats.swatDamage() * 2) < 1e-9, 'fifth consecutive hit deals double damage');
+  te.run.time += 1.6;
+  const beforeReset = probe.hp;
+  const resetHit = te.swatThreat(probe.eventId);
+  ok(!resetHit.message.includes('连击') && Math.abs(beforeReset - probe.hp - te.threats.swatDamage()) < 1e-9, 'combo expires after 1.5 seconds');
+  te.run.threats.active = te.run.threats.active.filter((t) => t !== probe);
   const honey0 = te.w.econ.num(Res.Honey);
   let taps = 0;
   let last = '';
   while (taps < 80 && te.threats.activeList().length > 0) { te.step(0.2); last = te.swatThreat('tap1').message; taps++; }
-  ok(te.threats.activeList().length === 0 && !f.webbed && taps === Math.ceil(30 / te.threats.swatDamage()), 'a web needs hp / guard-attack taps by hand', `${taps} taps`);
+  let expectedTaps = 0;
+  while ((expectedTaps + Math.floor(expectedTaps / 5)) * te.threats.swatDamage() < 30) expectedTaps++;
+  ok(te.threats.activeList().length === 0 && !f.webbed && taps === expectedTaps, 'combo critical damage reduces taps needed to clear a web', `${taps} taps`);
   ok(last.startsWith('亲手击退') && te.w.econ.num(Res.Honey) > honey0, 'hand clear pays honey', last);
   ok((te.run.threats.streak ?? 0) === 1 && (te.run.threats.swats ?? 0) >= taps, 'streak and swat counters advance');
   te.threats.honeyPerSec = () => 100;

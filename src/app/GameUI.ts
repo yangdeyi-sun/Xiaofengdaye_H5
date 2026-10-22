@@ -717,11 +717,12 @@ export class GameUI {
     const result = this.engine().swatThreat(id);
     if (result.code === 'THREAT_COOLDOWN') return;
     if (!result.ok) { this.holdThreat = ''; return; }
+    const critical = result.message.includes('暴击');
     const killed = result.message.startsWith('亲手击退');
     // 补刀击退：奖励数字直接飘在敌害身上，不再另弹提示条
-    this.session.renderer?.swatFx(id, killed ? result.message.replace('亲手击退！', '击退 ') : result.message, killed);
+    this.session.renderer?.swatFx(id, killed ? result.message.replace('亲手击退！', '击退 ') : result.message, killed || critical);
     this.session.audio.play('ui_tap');
-    this.session.audio.vibrate(killed ? 30 : 10);
+    this.session.audio.vibrate(killed || critical ? 30 : 10);
     if (killed) this.holdThreat = '';
   }
 
@@ -1637,7 +1638,7 @@ export class GameUI {
     }).join('');
     const nextExpand = e.run.hive.cells.filter((cell) => e.hive.canExpandCell(cell)).sort((a, b) => a.ring - b.ring)[0];
     const expandCostText = nextExpand === undefined ? '已达本种区上限' : `下一格 ${costStr(e.hive.expandCost(nextExpand))}，现有蜂蜡 ${Math.floor(e.w.econ.num(Res.Wax))}`;
-    const expand = `<div class="compact-row">${icon('xf_action_expand')}<span><b>扩建蜂巢</b><small>${e.w.unlocked('t_build_storage') ? `点蜂巢外圈带“+”的格子即可扩建 · ${expandCostText}` : '建成第一个储蜜格后开放'}</small></span>${e.w.unlocked('t_build_storage') ? `${button('expand-next', '扩建一格', { primary: true })}${button('focus-expand', '去蜂巢选格')}` : ''}</div>`;
+    const expand = `<div class="expand-card"><div class="compact-row">${icon('xf_action_expand')}<span><b>扩建蜂巢</b><small>${e.w.unlocked('t_build_storage') ? `点蜂巢外圈带“+”的格子即可扩建 · ${expandCostText}` : '建成第一个储蜜格后开放'}</small></span></div>${e.w.unlocked('t_build_storage') ? `<div class="expand-actions">${button('expand-next', '扩建一格', { primary: true })}${button('focus-expand', '去蜂巢选格')}</div>` : ''}</div>`;
     return this.panelFrame('建造', 'xf_action_build', `<p class="muted">${free > 0 ? `选好巢房后，在蜂巢里点一个发光的空格放置（空格 ${free} 个）` : '蜂巢没有空格了：先扩建外圈的格子'}</p>${cards}<hr>${expand}`);
   }
 

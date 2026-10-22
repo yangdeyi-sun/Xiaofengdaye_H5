@@ -167,7 +167,7 @@ export const INTRO_TOPICS: IntroTopic[] = [
     '右侧功能栏「蜂群」里可以分配酿蜜和筑巢（产蜂蜡）的比例。', 'xf_role_house', '', '',
     (e: GameEngine) => e.w.role(Role.House) > 0),
   new IntroTopic('threats', '敌害', '胡蜂、蜘蛛网和蜡螟会不时出现。新手阶段它们只会让蜜蜂受伤；新手结束后会咬死蜜蜂，而且每个四季轮回都更强。',
-    '直接点敌害就能亲手驱赶（按住连续拍打），每下的伤害和一只守卫蜂一样；守卫蜂也会自动出击，守卫越多、攻击效率越高，伤亡越少。击退能拿到蜂蜜，连续击退 5 次再送 1 蜂王浆。', 'xf_threat_danger', '', '',
+    '直接点敌害就能亲手驱赶（按住连续拍打），每下的基础伤害和一只守卫蜂一样，1.5秒内连续拍打，每第5下触发2倍暴击；守卫蜂也会自动出击，守卫越多、攻击效率越高，伤亡越少。击退能拿到蜂蜜，连续击退 5 次再送 1 蜂王浆。', 'xf_threat_danger', '', '',
     (e: GameEngine) => e.run.threats.enabled),
   new IntroTopic('wasp', '胡蜂', '在航线附近盘旋的掠食者。', '会降低那片花田的采集效率，弄伤甚至咬死采集蜂；点胡蜂亲手驱赶，守卫蜂也会赶来帮忙。',
     'xf_enemy_wasp', '', 'field', (e: GameEngine) => hasThreat(e, ThreatType.Wasp)),

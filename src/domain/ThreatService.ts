@@ -37,6 +37,7 @@ export class ThreatService {
   honeyPerSec: () => number = () => 0;
   /** 亲手拍打的节流（不存档） */
   private lastSwatAt: Record<string, number> = {};
+  private swatCombos: Record<string, number> = {};
   private tutorialWasDone: boolean;
   /** 致死累积（不存档）：按敌害 id 记录不足一只的部分 */
   private deathAcc: Record<string, number> = {};
@@ -666,17 +667,21 @@ export class ThreatService {
     if (last !== undefined && t - last < 0.12) {
       return CmdResult.fail('THREAT_COOLDOWN', '');
     }
+    const combo = last !== undefined && t - last <= 1.5 ? (this.swatCombos[eventId] ?? 0) + 1 : 1;
     this.lastSwatAt[eventId] = t;
-    const dmg = this.swatDamage();
+    this.swatCombos[eventId] = combo;
+    const critical = combo % 5 === 0;
+    const dmg = this.swatDamage() * (critical ? 2 : 1);
+    const hit = `${critical ? "暴击！" : ""}-${dmg >= 10 ? Math.round(dmg) : Math.round(dmg * 10) / 10}${combo > 1 ? ` 连击×${combo}` : ""}`;
     e.hp -= dmg;
     const th = this.w.s.run.threats;
     th.swats = (th.swats ?? 0) + 1;
     if (e.hp <= 0) {
       const gain = this.settle(e, true, true);
       delete this.lastSwatAt[eventId];
-      return CmdResult.ok(`亲手击退！${gain}`);
+      return CmdResult.ok(`亲手击退！${hit} · ${gain}`);
     }
-    return CmdResult.ok(`-${dmg >= 10 ? Math.round(dmg) : Math.round(dmg * 10) / 10}`);
+    return CmdResult.ok(hit);
   }
 
   private settle(e: ThreatEvent, won: boolean, byPlayer: boolean = false): string {
@@ -685,6 +690,8 @@ export class ThreatService {
     }
     e.settled = true;
     delete this.deathAcc[e.eventId];
+    delete this.lastSwatAt[e.eventId];
+    delete this.swatCombos[e.eventId];
     const th = this.w.s.run.threats;
     if (th.nextSpawnAt < this.w.s.run.time + 40) th.nextSpawnAt = this.w.s.run.time + 40;
     const d = this.def(e.type);
